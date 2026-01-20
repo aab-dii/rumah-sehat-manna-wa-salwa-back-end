@@ -13,7 +13,7 @@ class BookingController extends Controller
 
 
     public function show($id) {
-        $booking = Booking::with(['patient', 'therapist', 'service'])->find($id);
+        $booking = Booking::with(['patient', 'therapist', 'service', 'transaction'])->find($id);
 
         if ($booking) {
             return ResponseFormatter::success($booking, 'Detail Booking berhasil diambil');
@@ -45,7 +45,7 @@ class BookingController extends Controller
             }
         }
 
-        $booking = Booking::with(['service', 'therapist', 'patient']);
+        $booking = Booking::with(['service', 'therapist', 'patient', 'transaction']);
 
         // Jika bukan admin, hanya ambil booking milik sendiri
         if (Auth::user()->role !== 'admin') {
@@ -105,21 +105,58 @@ class BookingController extends Controller
             'location_type' => 'required|in:clinic,home',
             'address' => 'required|string',
             'total_price' => 'required|integer',
+            'payment_method' => 'required|in:transfer,later',
+            'proof_of_transfer' => 'nullable|image|max:2048', // Allow null for later upload
         ]);
 
-        $booking = Booking::create([
-            'patient_id' => Auth::user()->id,
-            'service_id' => $request->service_id,
-            'therapist_id' => $request->therapist_id,
-            'booking_date' => $request->booking_date,
-            'booking_time' => $request->booking_time,
-            'location_type' => $request->location_type,
-            'status' => 'pending',
-            'address' => $request->address,
-            'total_price' => $request->total_price,
-        ]);
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($request) {
+            $booking = Booking::create([
+                'patient_id' => Auth::user()->id,
+                'service_id' => $request->service_id,
+                'therapist_id' => $request->therapist_id,
+                'booking_date' => $request->booking_date,
+                'booking_time' => $request->booking_time,
+                'location_type' => $request->location_type,
+                'status' => 'pending',
+                'address' => $request->address,
+                'total_price' => $request->total_price,
+                'created_by' => Auth::id(),
+            ]);
 
-        return ResponseFormatter::success($booking, 'Booking berhasil dibuat');
+            // Handling Payment / Transaction
+            $paymentMethod = $request->payment_method;
+            $paymentStatus = ($paymentMethod === 'later') ? 'unpaid' : 'paid'; // Transfer assumed paid/pending verification
+            // If transfer, status is technically 'pending' verification, but for transaction table 'paid' or 'pending'?
+            // Admin flow uses 'paid' if transfer? Let's check store method.
+            // Store method: $paymentStatus = $request->payment_status ?? 'unpaid';
+            // Here we infer. If transfer, it's pending verif. Let's use 'pending' or 'paid'.
+            // Usually 'unpaid' for 'later'. 'paid' (or pending_verification) for transfer.
+            // Let's use 'pending' for transfer to be safe? Or 'paid' and let Admin reject?
+            // User said "reset to pending" on reupload. So maybe initial is 'pending'?
+            // Transaction status enum: unpaid, paid, failed, pending.
+            
+            $transactionStatus = 'unpaid';
+            if ($paymentMethod === 'transfer') {
+                // If proof exists, it's pending verification. If not, it's unpaid (waiting for upload).
+                $transactionStatus = ($request->hasFile('proof_of_transfer')) ? 'pending' : 'unpaid';
+            }
+
+            $proofPath = null;
+            if ($paymentMethod === 'transfer' && $request->hasFile('proof_of_transfer')) {
+                $file = $request->file('proof_of_transfer');
+                $proofPath = $file->store('proofs', 'public');
+            }
+            
+            \App\Models\Transaction::create([
+                'booking_id' => $booking->id,
+                'payment_method' => $paymentMethod,
+                'status' => $transactionStatus,
+                'amount' => $request->total_price,
+                'proof_of_transfer' => $proofPath
+            ]);
+
+            return ResponseFormatter::success($booking->load('transaction'), 'Booking berhasil dibuat');
+        });
     }
 
     public function store(\App\Http\Requests\StoreBookingRequest $request)
@@ -153,6 +190,24 @@ class BookingController extends Controller
                 'Tidak dapat melakukan booking. Terapis sedang libur pada tanggal tersebut.',
                 422
             );
+        }
+
+        // 3.1 Check IF Past Time (Added for Security)
+        $serverNow = \Carbon\Carbon::now();
+        $requestDate = \Carbon\Carbon::parse($bookingDate);
+        
+        if ($requestDate->isSameDay($serverNow)) {
+             // Create Carbon instance for requested time on today
+             $requestedDateTime = \Carbon\Carbon::parse($bookingDate . ' ' . $request->start_time);
+             
+             // Check if requested time is in past (with 5 min buffer)
+             if ($requestedDateTime->lessThan($serverNow->subMinutes(5))) {
+                  return ResponseFormatter::error(
+                    null, 
+                    'Tidak dapat memesan waktu yang sudah lewat.',
+                    422
+                );
+             }
         }
 
         // We need to fetch existing bookings for this therapist & date
@@ -207,11 +262,35 @@ class BookingController extends Controller
                 'therapist_id' => $request->therapist_id,
                 'booking_date' => $request->booking_date,
                 'booking_time' => $request->start_time, // Map start_time to booking_time
-                'location_type' => $request->location_type,
-                'status' => 'pending', // Default to pending even for Admin
-                'address' => $request->address,
+                'location_type' => $request->location_type ?? 'clinic',
+                'booking_time' => $request->start_time, // Map start_time to booking_time
+                'location_type' => $request->location_type ?? 'clinic',
+                'status' => $request->status ?? 'pending', // Allow Admin to set status
+                'address' => $request->address ?? 'Klinik Rumah Sehat Manna wa Salwa', // Default Address
                 'total_price' => $service->price, // Snapshot price
+                'total_price' => $service->price, // Snapshot price
+                'created_by' => Auth::id(), // Admin or User creating via store endpoint
                 // 'notes' => $request->notes // Add notes if column exists, for now omit or add migration
+            ]);
+
+            // Handling Payment / Transaction
+            $paymentStatus = $request->payment_status ?? 'unpaid';
+            $paymentMethod = $request->payment_method;
+            $proofPath = null;
+
+            if ($paymentMethod === 'transfer' && $request->hasFile('proof_of_transfer')) {
+                // Upload file to 'public/proofs'
+                $file = $request->file('proof_of_transfer');
+                $proofPath = $file->store('proofs', 'public');
+            }
+            
+            // Create Transaction Record
+            \App\Models\Transaction::create([
+                'booking_id' => $booking->id,
+                'payment_method' => $paymentMethod,
+                'status' => $paymentStatus,
+                'amount' => $price,
+                'proof_of_transfer' => $proofPath
             ]);
 
             return ResponseFormatter::success($booking, 'Booking berhasil dibuat oleh Admin', 201);
@@ -290,19 +369,11 @@ class BookingController extends Controller
             $openTime = \Carbon\Carbon::createFromFormat('H:i:s', $schedule->start_time);
             $closeTime = \Carbon\Carbon::createFromFormat('H:i:s', $schedule->end_time);
         } else {
-            error_log("No Schedule Found for $dayOfWeek. Using Default 09:00 - 21:00");
-            
-            // Debug: Print ALL schedules for this therapist to see what's wrong
-            $allSchedules = \App\Models\Schedule::where('therapist_id', $therapistId)->get();
-            error_log("DEBUG: Existing Schedules for Therapist $therapistId: " . $allSchedules->toJson());
-
-            // Default Operational Hours if no specific schedule found
-            // Or should we return empty? Let's keep default for now or strict?
-            // User requested "ambil dari situ", implies strictness.
-            // If no schedule, maybe therapist doesn't work that day?
-            // Let's assume default 09-21 ONLY if no schedule entry exists at all to avoid breaking existing data
-            $openTime = \Carbon\Carbon::createFromFormat('H:i', '09:00');
-            $closeTime = \Carbon\Carbon::createFromFormat('H:i', '21:00');
+            error_log("No Active Schedule Found for $dayOfWeek. Returning Empty.");
+            return ResponseFormatter::success(
+                [], 
+                "Terapis tidak memiliki jadwal operasional pada hari $dayOfWeek."
+            );
         }
 
         // 3. Get Existing Bookings
@@ -349,6 +420,25 @@ class BookingController extends Controller
              $current->addMinutes($interval); 
         }
 
+        // 5. Filter Past Slots (Server-Side Security)
+        // Ensure we don't return slots that have already passed if the date is Today
+        $serverNow = \Carbon\Carbon::now();
+        $requestDate = \Carbon\Carbon::parse($date);
+        
+        if ($requestDate->isSameDay($serverNow)) {
+            $slots = array_filter($slots, function($slot) use ($serverNow) {
+                // slot format is H:i
+                $slotTime = \Carbon\Carbon::createFromFormat('H:i', $slot);
+                // We add a buffer (e.g. 15 mins) or strict check? 
+                // Let's strict check: if 10:00 passed, 10:00 is invalid.
+                // Or maybe allow if it's 10:05 and slot is 10:00? No, that's late.
+                // Strict: slotTime > now
+                return $slotTime->greaterThan($serverNow->addMinutes(5)); // 5 min buffer for latency
+            });
+            // Re-index array
+            $slots = array_values($slots);
+        }
+
         return ResponseFormatter::success(
             $slots, 
             "Available slots retrieved ({$openTime->format('H:i')} - {$closeTime->format('H:i')})"
@@ -379,5 +469,61 @@ class BookingController extends Controller
         $booking->update(['status' => 'canceled']);
 
         return ResponseFormatter::success($booking, 'Booking berhasil dibatalkan');
+    }
+
+    public function rejectPayment(Request $request, $id)
+    {
+        $request->validate([
+            'reason' => 'required|string',
+        ]);
+
+        $booking = Booking::with('transaction')->find($id);
+
+        if (!$booking) {
+            return ResponseFormatter::error(null, 'Booking tidak ditemukan', 404);
+        }
+
+        if (!$booking->transaction) {
+            return ResponseFormatter::error(null, 'Transaksi tidak ditemukan', 404);
+        }
+
+        $booking->transaction->update([
+            'status' => 'rejected',
+            'rejection_note' => $request->reason,
+        ]);
+
+        return ResponseFormatter::success($booking->load('transaction'), 'Pembayaran berhasil ditolak. Menunggu upload ulang.');
+    }
+    public function reuploadProof(Request $request, $id)
+    {
+        $request->validate([
+            'proof_of_transfer' => 'required|image|max:2048',
+        ]);
+
+        $booking = Booking::with('transaction')->find($id);
+
+        if (!$booking) {
+            return ResponseFormatter::error(null, 'Booking tidak ditemukan', 404);
+        }
+
+        if (!$booking->transaction) {
+            return ResponseFormatter::error(null, 'Transaksi tidak ditemukan', 404);
+        }
+
+        if ($request->hasFile('proof_of_transfer')) {
+            $file = $request->file('proof_of_transfer');
+            $path = $file->store('proofs', 'public');
+
+            $booking->transaction->update([
+                'proof_of_transfer' => $path,
+                'status' => 'pending', // Reset to pending verification
+                // Optional: Clear rejection note if you want to wipe history
+                'rejection_note' => null 
+            ]);
+
+            return ResponseFormatter::success($booking->load('transaction'), 'Bukti transfer berhasil diupload ulang');
+        }
+
+        return ResponseFormatter::error(null, 'File bukti transfer tidak ditemukan', 400);
     }
 }

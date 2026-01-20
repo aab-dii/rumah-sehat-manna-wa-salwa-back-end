@@ -43,6 +43,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('bookings/{id}/cancel', [BookingController::class, 'cancel']);
     Route::get('available-slots', [BookingController::class, 'availableSlots']); // New Endpoint
     Route::post('checkout', [BookingController::class, 'checkout']);
+    Route::post('bookings/{id}/reupload-proof', [BookingController::class, 'reuploadProof']);
+    Route::post('bookings/{id}/reject-payment', [BookingController::class, 'rejectPayment']);
 
+    Route::get('dashboard', [\App\Http\Controllers\API\DashboardController::class, 'index']);
     Route::get('medical-records', [MedicalRecordController::class, 'all']);
 });

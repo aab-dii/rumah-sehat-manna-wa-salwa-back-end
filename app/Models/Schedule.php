@@ -20,8 +20,8 @@ class Schedule extends Model
     ];
 
     protected $casts = [
-        'specific_date' => 'date',
-        'end_date' => 'date',
+        'specific_date' => 'date:Y-m-d',
+        'end_date' => 'date:Y-m-d',
         'is_active' => 'boolean',
     ];
 

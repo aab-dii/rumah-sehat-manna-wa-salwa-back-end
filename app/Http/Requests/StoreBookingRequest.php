@@ -22,9 +22,15 @@ class StoreBookingRequest extends FormRequest
             'service_id' => 'required|exists:services,id',
             'booking_date' => 'required|date|after_or_equal:today',
             'start_time' => 'required|date_format:H:i',
-            'location_type' => 'required|in:clinic,home',
-            'address' => 'required|string',
+            'location_type' => 'nullable|in:clinic,home',
+            'address' => 'nullable|string',
             'notes' => 'nullable|string',
+            'payment_status' => 'nullable|in:paid,unpaid,pending',
+            'payment_method' => 'nullable|in:cash,transfer',
+            'payment_status' => 'nullable|in:paid,unpaid,pending',
+            'payment_method' => 'nullable|in:cash,transfer',
+            'proof_of_transfer' => 'nullable|image|max:2048',
+            'status' => 'nullable|in:pending,confirmed,completed,canceled',
         ];
     }
 }

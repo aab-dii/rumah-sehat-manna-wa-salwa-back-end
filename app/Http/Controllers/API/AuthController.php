@@ -96,6 +96,22 @@ class AuthController extends Controller
             $user = User::where('email', $request->email)->first();
             // No need to create token for the new user since Admin is creating it
 
+            // Auto-create Schedule if role is 'terapis'
+            if ($request->role === 'terapis') {
+                $days = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+                foreach ($days as $day) {
+                    \App\Models\Schedule::create([
+                        'therapist_id' => $user->id,
+                        'day' => $day,
+                        'start_time' => '09:00', // Default start
+                        'end_time' => '17:00',   // Default end
+                        'is_active' => false,    // Default inactive per user request
+                        'type' => 'regular',
+                        'location_type' => 'clinic', // Default
+                    ]);
+                }
+            }
+
             return ResponseFormatter::success($user, 'User Created by Admin');
         } catch (\Exception $error) {
             return ResponseFormatter::error([

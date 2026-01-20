@@ -18,6 +18,7 @@ class Booking extends Model
         'address',
         'total_price',
         'cancellation_reason',
+        'created_by',
     ];
 
     protected $casts = [
@@ -42,5 +43,14 @@ class Booking extends Model
     public function schedule()
     {
         return $this->belongsTo(Schedule::class);
+    }
+    public function transaction()
+    {
+        return $this->hasOne(Transaction::class);
+    }
+
+    public function creator()
+    {
+        return $this->belongsTo(User::class, 'created_by');
     }
 }
