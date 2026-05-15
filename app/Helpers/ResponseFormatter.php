@@ -23,6 +23,8 @@ class ResponseFormatter
      */
     public static function success($data = null, $message = null)
     {
+        self::$response['meta']['status'] = 'success';
+        self::$response['meta']['code'] = 200;
         self::$response['meta']['message'] = $message;
         self::$response['data'] = $data;
 

@@ -1,45 +1,92 @@
 <?php
 
-namespace App\Http\Controllers\API;
+namespace App\Http\Controllers\Api;
 
-use App\Helpers\ResponseFormatter;
 use App\Http\Controllers\Controller;
 use App\Models\Booking;
-use App\Models\User;
-use Illuminate\Http\Request;
 use Carbon\Carbon;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class DashboardController extends Controller
 {
+    /**
+     * Unified dashboard endpoint — role-aware scoping.
+     * Same concept as BookingController::all():
+     *   - admin    → all bookings
+     *   - terapis  → only their own (therapist_id = auth id)
+     *   - pasien   → only their own (patient_id = auth id)
+     */
     public function index(Request $request)
     {
-        $user = $request->user();
-        if ($user->role !== 'admin') {
-            return ResponseFormatter::error(null, 'Unauthorized', 403);
+        $timezone  = $request->input('timezone', 'Asia/Jakarta');
+        $today     = Carbon::now($timezone)->toDateString();
+        $user      = Auth::user();
+
+        // ── Base query scoped by role ──────────────────────────────────────
+        $base = Booking::query();
+
+        if ($user->role === 'terapis') {
+            $base->where('therapist_id', $user->id);
+        } elseif ($user->role === 'pasien') {
+            $base->where('patient_id', $user->id);
         }
+        // admin → no scope (sees everything)
 
-        $today = Carbon::now()->toDateString();
+        // ── Today stats ───────────────────────────────────────────────────
+        $todayBase = (clone $base)->whereDate('booking_date', $today);
 
-        // 1. Statistics
-        $stats = [
-            'today_bookings_count' => Booking::whereDate('booking_date', $today)->count(),
-            'pending_bookings_count' => Booking::whereIn('status', ['pending', 'menunggu', 'konfirmasi'])->count(),
-            'total_patients' => User::where('role', 'pasien')->count(),
-            'total_therapists' => User::where('role', 'terapis')->count(),
+        $todayStats = [
+            'confirmed' => (clone $todayBase)->where('status', 'confirmed')->count(),
+            'completed' => (clone $todayBase)->where('status', 'completed')->count(),
+            'canceled'  => (clone $todayBase)->where('status', 'canceled')->count(),
+            'total'     => (clone $todayBase)->count(),
         ];
 
-        // 2. Today's Schedule (Active bookings only)
-        // Exclude cancelled? Maybe admin wants to see everything, but mainly active appointments.
-        $todaySchedule = Booking::with(['patient', 'therapist', 'service'])
-            ->whereDate('booking_date', $today)
-            ->whereNotIn('status', ['cancelled', 'canceled', 'batal'])
-            ->orderBy('booking_time', 'asc')
-            ->limit(10)
-            ->get();
+        // ── Upcoming agenda (next 3 confirmed from today) ─────────────────
+        $upcomingAgenda = (clone $base)
+            ->with(['patient:id,name', 'therapist:id,name', 'service:id,name'])
+            ->where('status', 'confirmed')
+            ->whereDate('booking_date', '>=', $today)
+            ->orderBy('booking_date')
+            ->orderBy('booking_time')
+            ->limit(3)
+            ->get()
+            ->map(fn($b) => [
+                'id'           => $b->id,
+                'patient_name' => $b->patient->name  ?? '-',
+                'therapist_name' => $b->therapist->name ?? '-',
+                'service_name' => $b->service->name  ?? '-',
+                'booking_date' => $b->booking_date,
+                'booking_time' => $b->booking_time,
+                'status'       => $b->status,
+            ]);
 
-        return ResponseFormatter::success([
-            'stats' => $stats,
-            'today_schedule' => $todaySchedule
-        ], 'Dashboard data retrieved successfully');
+        // ── Admin-only extras ─────────────────────────────────────────────
+        $adminExtras = [];
+        if ($user->role === 'admin') {
+            // Statistik Admin Hari Ini (untuk cards)
+            $adminExtras['admin_stats'] = [
+                'confirmed'            => (clone $todayBase)->where('status', 'confirmed')->count(),
+                'pending'              => (clone $todayBase)->where('status', 'pending')->count(),
+                'waiting_verification' => (clone $todayBase)->where('status', 'waiting_verification')->count(),
+                'canceled'             => (clone $todayBase)->where('status', 'canceled')->count(),
+            ];
+
+            // Revenue bulan ini dari transactions.amount (sumber kebenaran harga)
+            $startOfMonth = Carbon::now($timezone)->startOfMonth()->toDateString();
+            $adminExtras['monthly_revenue'] = Booking::whereDate('booking_date', '>=', $startOfMonth)
+                ->whereDate('booking_date', '<=', $today)
+                ->whereHas('transaction', fn($q) => $q->where('status', 'paid'))
+                ->with('transaction')
+                ->get()
+                ->sum(fn($b) => $b->transaction->amount ?? 0);
+        }
+
+        return response()->json(array_merge([
+            'today_stats'     => $todayStats,
+            'upcoming_agenda' => $upcomingAgenda,
+            'server_today'    => $today,
+        ], $adminExtras));
     }
 }

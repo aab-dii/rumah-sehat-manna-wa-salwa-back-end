@@ -18,4 +18,11 @@ class EditBooking extends EditRecord
             DeleteAction::make(),
         ];
     }
+
+    protected function afterSave(): void
+    {
+        $booking = $this->record;
+        $booking->load(['service', 'therapist', 'patient', 'transaction']);
+        event(new \App\Events\MyEvent($booking));
+    }
 }

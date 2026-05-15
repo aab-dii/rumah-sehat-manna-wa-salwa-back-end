@@ -34,6 +34,8 @@ class User extends Authenticatable
         'birth_date',
         'specialization',
         'profile_photo_path',
+        'photo_url',
+        'fcm_token',
     ];
 
     /**
@@ -54,13 +56,34 @@ class User extends Authenticatable
     protected function casts(): array
     {
         return [
-            'birth_date' => 'date',
+            // 'date' cast menyebabkan Laravel mengkonversi ke Carbon/UTC sehingga
+            // tanggal bergeser -1 hari bagi user di timezone WIB (UTC+7).
+            // Solusi: gunakan 'string' agar tanggal disimpan & dibaca apa adanya (YYYY-MM-DD).
+            'birth_date' => 'string',
             'specialization' => 'array',
             'password' => 'hashed',
         ];
     }
     public function medicalRecords()
     {
-        return $this->hasMany(MedicalRecord::class, 'patient_id');
+        return $this->hasMany(TherapyRecord::class, 'patient_id');
+    }
+
+    public function therapistBookings()
+    {
+        return $this->hasMany(Booking::class, 'therapist_id');
+    }
+
+    protected $appends = [
+        'profile_photo_url',
+    ];
+
+    public function getProfilePhotoUrlAttribute()
+    {
+        if ($this->profile_photo_path) {
+            return url('storage/' . $this->profile_photo_path);
+        }
+
+        return $this->photo_url;
     }
 }

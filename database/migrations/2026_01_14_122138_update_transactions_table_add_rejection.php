@@ -26,7 +26,9 @@ return new class extends Migration
         });
         
         // Use raw statement to update Enum if MySQL
-        \Illuminate\Support\Facades\DB::statement("ALTER TABLE transactions MODIFY COLUMN status ENUM('paid', 'unpaid', 'pending', 'rejected') DEFAULT 'unpaid'");
+        if (\Illuminate\Support\Facades\DB::getDriverName() !== 'sqlite') {
+            \Illuminate\Support\Facades\DB::statement("ALTER TABLE transactions MODIFY COLUMN status ENUM('paid', 'unpaid', 'pending', 'rejected') DEFAULT 'unpaid'");
+        }
     }
 
     public function down(): void

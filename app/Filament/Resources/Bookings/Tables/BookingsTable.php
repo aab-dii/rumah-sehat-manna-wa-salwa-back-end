@@ -29,7 +29,7 @@ class BookingsTable
                     ->sortable(),
                 TextColumn::make('booking_date')
                     ->label('Tanggal')
-                    ->date('d/m/Y')
+                    ->formatStateUsing(fn (string $state): string => \Carbon\Carbon::parse($state)->format('d/m/Y'))
                     ->sortable(),
                 TextColumn::make('booking_time')
                     ->label('Jam')

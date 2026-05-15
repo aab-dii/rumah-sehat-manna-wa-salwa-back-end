@@ -18,11 +18,14 @@ class Booking extends Model
         'address',
         'total_price',
         'cancellation_reason',
-        'created_by',
+        'payment_deadline',
+        'reminder_sent_at',
     ];
 
     protected $casts = [
-        'booking_date' => 'date',
+        'booking_date' => 'date:Y-m-d',
+        'payment_deadline' => 'datetime',
+        'reminder_sent_at' => 'datetime'
     ];
 
     public function patient()
@@ -37,7 +40,7 @@ class Booking extends Model
 
     public function service()
     {
-        return $this->belongsTo(Service::class);
+        return $this->belongsTo(Service::class)->withTrashed();
     }
 
     public function schedule()
@@ -49,8 +52,62 @@ class Booking extends Model
         return $this->hasOne(Transaction::class);
     }
 
-    public function creator()
+    public function therapyRecord()
     {
-        return $this->belongsTo(User::class, 'created_by');
+        return $this->hasOne(TherapyRecord::class);
+    }
+
+    protected static function booted()
+    {
+        static::updated(function ($booking) {
+            try {
+                event(new \App\Events\MyEvent($booking));
+            } catch (\Exception $e) {
+                // Log error silently to not break the app flow
+                \Illuminate\Support\Facades\Log::error("Pusher Updated Event Failed: " . $e->getMessage());
+            }
+        });
+    }
+
+    protected $appends = ['status_baru']; 
+
+    public function getStatusBaruAttribute()
+    {
+        // 1. AMBIL NILAI ASLI DARI DATABASE
+        $originalStatus = $this->getRawOriginal('status');
+    
+        $rawStatus = $originalStatus ?? 'pending'; 
+        $bStatus = strtoupper($rawStatus); 
+
+        $transaction = $this->transaction;
+        
+        if (!$transaction) {
+            return strtolower($rawStatus);
+        }
+
+        $tStatus = strtolower($transaction->status);
+        $method = strtolower($transaction->payment_method);
+
+        // Logic 1: Cek Pembatalan/Selesai
+        if ($bStatus === 'CANCELED') return 'canceled';
+        if ($bStatus === 'COMPLETED') return 'completed';
+        if ($bStatus === 'FORCE_COMPLETED') {
+            if (auth()->check() && auth()->user()->role === 'pasien') {
+                return 'completed';
+            }
+            return 'force_completed';
+        }
+
+        // Logic 2: Alur Transfer
+        if ($method === 'transfer') {
+            if ($tStatus === 'unpaid') return 'waiting_payment';
+            if ($tStatus === 'pending') return 'waiting_verification';
+            if ($tStatus === 'rejected') return 'payment_rejected';
+        }
+
+        // Logic 3: Status Terjadwal
+        if ($bStatus === 'CONFIRMED') return 'confirmed';
+        
+        return strtolower($rawStatus);
     }
 }

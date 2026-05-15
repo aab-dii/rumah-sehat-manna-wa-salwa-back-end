@@ -9,4 +9,6 @@ Artisan::command('inspire', function () {
 
 use Illuminate\Support\Facades\Schedule;
 
-Schedule::command('bookings:auto-cancel')->dailyAt('00:01');
+Schedule::command('bookings:cancel-expired')->everyMinute();
+Schedule::command('bookings:auto-cancel')->daily();
+Schedule::command('reminders:send')->everyThirtyMinutes();

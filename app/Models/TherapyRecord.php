@@ -4,14 +4,15 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class MedicalRecord extends Model
+class TherapyRecord extends Model
 {
+    protected $table = 'therapy_records';
+
     protected $fillable = [
         'booking_id',
         'patient_id',
         'therapist_id',
         'patient_complaint',
-        'diagnosis',
         'therapist_action',
         'additional_notes',
         'examination_date',

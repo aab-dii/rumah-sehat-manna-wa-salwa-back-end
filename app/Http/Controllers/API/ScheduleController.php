@@ -56,6 +56,7 @@ class ScheduleController extends Controller
                 'day' => $request->day,
             ],
             [
+                'start_time' => $request->start_time,
                 'end_time' => $request->end_time,
                 'is_active' => $request->is_active,
                 'type' => 'routine' // Default standard per codebase (was 'regular')

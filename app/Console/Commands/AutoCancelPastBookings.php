@@ -32,14 +32,23 @@ class AutoCancelPastBookings extends Command
         // statuses to check
         $activeStatuses = ['pending', 'confirmed', 'menunggu', 'konfirmasi'];
 
-        // Update queries
-        $affected = \App\Models\Booking::where('booking_date', '<', $today)
+        // Get bookings to cancel
+        $bookings = \App\Models\Booking::where('booking_date', '<', $today)
             ->whereIn('status', $activeStatuses)
-            ->update([
+            ->get();
+
+        $count = 0;
+        foreach ($bookings as $booking) {
+            $booking->update([
                 'status' => 'canceled',
                 'cancellation_reason' => 'Otomatis Dibatalkan: Melewati jadwal (System)'
             ]);
+            
+            // Trigger notification
+            event(new \App\Events\BookingStatusUpdated($booking));
+            $count++;
+        }
 
-        $this->info("Success! $affected past bookings have been cancelled.");
+        $this->info("Success! $count past bookings have been cancelled and notified.");
     }
 }
