@@ -5,6 +5,7 @@ namespace App\Http\Controllers\API;
 use App\Helpers\ResponseFormatter;
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\Booking;
 use App\Models\Schedule;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -203,6 +204,21 @@ class UserController extends Controller
 
         if (!$user) {
             return ResponseFormatter::error(null, 'User tidak ditemukan', 404);
+        }
+
+        // Validasi: Jika terapis, cek apakah ada booking aktif (pending/confirmed)
+        if ($user->role === 'terapis') {
+            $activeBookings = Booking::where('therapist_id', $id)
+                ->whereIn('status', ['pending', 'confirmed'])
+                ->exists();
+
+            if ($activeBookings) {
+                return ResponseFormatter::error(
+                    null,
+                    'Data tidak dapat dihapus karena masih memiliki janji temu aktif.',
+                    400
+                );
+            }
         }
 
         $user->delete();

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\API;
 use App\Helpers\ResponseFormatter;
 use App\Http\Controllers\Controller;
 use App\Models\Service;
+use App\Models\Booking;
 use Illuminate\Http\Request;
 
 class ServiceController extends Controller
@@ -131,6 +132,19 @@ class ServiceController extends Controller
                 null,
                 'Data layanan tidak ada',
                 404
+            );
+        }
+
+        // Validasi: Cek apakah ada booking aktif (pending/confirmed)
+        $activeBookings = Booking::where('service_id', $id)
+            ->whereIn('status', ['pending', 'confirmed'])
+            ->exists();
+
+        if ($activeBookings) {
+            return ResponseFormatter::error(
+                null,
+                'Data tidak dapat dihapus karena masih memiliki janji temu aktif.',
+                400
             );
         }
 
