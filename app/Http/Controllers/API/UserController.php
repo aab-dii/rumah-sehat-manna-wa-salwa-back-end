@@ -5,8 +5,10 @@ namespace App\Http\Controllers\API;
 use App\Helpers\ResponseFormatter;
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\Schedule;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 
 class UserController extends Controller
@@ -14,6 +16,10 @@ class UserController extends Controller
     /**
      * Display a listing of the resource.
      */
+    public function index(Request $request)
+    {
+        $role = $request->input('role');
+
         // Authorization check: Hanya admin yang bisa melihat daftar user (kecuali jika mencari list terapis)
         if ($request->user()->role !== 'admin') {
             if ($role !== 'terapis') {
@@ -66,7 +72,8 @@ class UserController extends Controller
                 'role' => ['required', 'string'],
             ]);
 
-            User::create([
+            // Langsung masukkan data dan tangkap instancenya, tidak perlu where email lagi
+            $user = User::create([
                 'name' => $request->nama_lengkap,
                 'email' => $request->email,
                 'password' => Hash::make($request->password),
@@ -80,13 +87,11 @@ class UserController extends Controller
                 'birth_date' => $request->tgl_lahir,
             ]);
 
-            $user = User::where('email', $request->email)->first();
-
             // Auto-create Schedule if role is 'terapis'
             if ($request->role === 'terapis') {
                 $days = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
                 foreach ($days as $day) {
-                    \App\Models\Schedule::create([
+                    Schedule::create([
                         'therapist_id' => $user->id,
                         'day' => $day,
                         'start_time' => '09:00',
@@ -124,8 +129,7 @@ class UserController extends Controller
             return ResponseFormatter::error(null, 'Akses ditolak', 403);
         }
 
-        // birth_date dikembalikan sebagai string YYYY-MM-DD (cast 'string' di model),
-        // tidak melalui Carbon sehingga tidak ada timezone shift.
+        // birth_date dikembalikan sebagai string YYYY-MM-DD
         return ResponseFormatter::success($user, 'Data user berhasil diambil');
     }
 
@@ -162,8 +166,6 @@ class UserController extends Controller
                 $user->specialization = $request->specialization;
             }
             if ($request->has('tgl_lahir')) {
-                // Simpan sebagai string YYYY-MM-DD apa adanya, tanpa konversi timezone.
-                // Cast model sudah 'string' sehingga Laravel tidak akan menggeser tanggal.
                 $user->birth_date = $request->tgl_lahir;
             }
             if ($request->has('jenis_kelamin')) {
@@ -178,7 +180,6 @@ class UserController extends Controller
 
             $user->save();
 
-            // birth_date dikembalikan sebagai string YYYY-MM-DD (bukan Carbon), aman dari timezone shift.
             return ResponseFormatter::success($user, 'Data user berhasil diperbarui');
         } catch (\Exception $error) {
              return ResponseFormatter::error([
