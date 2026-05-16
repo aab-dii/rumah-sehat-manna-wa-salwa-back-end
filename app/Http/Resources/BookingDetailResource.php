@@ -21,6 +21,7 @@ class BookingDetailResource extends JsonResource
                 'booking_time' => $startTime->format('H:i') . ' - ' . $endTime->format('H:i'),
                 'status' => $this->status_baru,
                 'total_price' => (int) $this->total_price,
+                'admin_fee' => (int) config('clinic.admin_fee', 1000),
                 'therapy_record_id' => $this->therapyRecord->id ?? null,
                 'cancellation_reason' => $this->cancellation_reason,
                 'payment_deadline' =>$this->payment_deadline 

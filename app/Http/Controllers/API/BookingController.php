@@ -294,6 +294,9 @@ class BookingController extends Controller
             }
 
             // --- 5. EKSEKUSI DATABASE ---
+            $adminFee = config('clinic.admin_fee', 1000);
+            $totalPrice = $price + $adminFee;
+
             $booking = Booking::create([
                 'patient_id' => $patientId,
                 'service_id' => $request->service_id,
@@ -303,7 +306,7 @@ class BookingController extends Controller
                 'location_type' => $request->location_type ?? 'clinic',
                 'status' => $bookingStatus,
                 'address' => $request->address ?? 'Klinik Rumah Sehat Manna wa Salwa',
-                'total_price' => $price,
+                'total_price' => $totalPrice,
                 'created_by' => $user->id,
                 'payment_deadline' => $paymentDeadline,
             ]);
@@ -314,7 +317,7 @@ class BookingController extends Controller
             }
 
             $booking->transaction()->create([
-                'amount' => $price,
+                'amount' => $totalPrice,
                 'status' => $paymentStatus,
                 'payment_method' => $request->payment_method ?? 'later',
                 'proof_of_transfer' => $proofPath
