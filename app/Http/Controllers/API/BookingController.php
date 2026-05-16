@@ -649,18 +649,26 @@ class BookingController extends Controller
         $service = \App\Models\Service::findOrFail($serviceId);
         $duration = $service->duration_minutes;
 
-        // 1.5 CHECK FOR HOLIDAYS (Added)
-        // Check if the requested date falls within any holiday range for this therapist
-        $isHoliday = \App\Models\Schedule::where('therapist_id', $therapistId)
-            ->where('type', 'holiday')
-            ->where('specific_date', '<=', $date) // Start <= Date
-            ->where('end_date', '>=', $date)       // End >= Date
+        // 1.5 CHECK FOR HOLIDAYS & EMERGENCY CLOSURES (Added)
+        $isClosed = \App\Models\Schedule::where('therapist_id', $therapistId)
+            ->where(function($q) use ($date) {
+                $q->where(function($sub) use ($date) {
+                    $sub->where('type', 'holiday')
+                        ->where('specific_date', '<=', $date)
+                        ->where('end_date', '>=', $date);
+                })
+                ->orWhere(function($sub) use ($date) {
+                    $sub->where('type', 'emergency')
+                        ->where('specific_date', $date);
+                });
+            })
+            ->where('is_active', false)
             ->exists();
 
-        if ($isHoliday) {
+        if ($isClosed) {
             return ResponseFormatter::success(
-                [], // Return empty slots
-                "Terapis sedang libur pada tanggal ini."
+                [], 
+                "Layanan tidak tersedia pada tanggal ini (Tutup/Libur)."
             );
         }
 
@@ -749,8 +757,8 @@ class BookingController extends Controller
                 // We add a buffer (e.g. 15 mins) or strict check? 
                 // Let's strict check: if 10:00 passed, 10:00 is invalid.
                 // Or maybe allow if it's 10:05 and slot is 10:00? No, that's late.
-                // Strict: slotTime > now
-                return $slotTime->greaterThan($serverNow->addMinutes(5)); // 5 min buffer for latency
+                // BUG FIX: Gunakan ->copy() agar $serverNow tidak bertambah di setiap iterasi filter
+                return $slotTime->greaterThan($serverNow->copy()->addMinutes(5)); // buffer 5 menit
             });
             // Re-index array
             $slots = array_values($slots);
@@ -789,16 +797,28 @@ class BookingController extends Controller
         // To optimize, we just fetch all active schedules for this therapist
         $schedules = \App\Models\Schedule::where('therapist_id', $therapistId)->where('is_active', true)->get()->keyBy('day');
         
-        // 2. Pre-fetch Holidays in range
-        $holidays = \App\Models\Schedule::where('therapist_id', $therapistId)
-            ->where('type', 'holiday')
+        // 2. Pre-fetch Closures (Holidays & Emergency) in range
+        $closures = \App\Models\Schedule::where('therapist_id', $therapistId)
+            ->whereIn('type', ['holiday', 'emergency'])
+            ->where('is_active', false)
             ->where(function($q) use ($startDate, $endDate) {
-                $q->whereBetween('specific_date', [$startDate, $endDate])
-                  ->orWhereBetween('end_date', [$startDate, $endDate])
-                  ->orWhere(function($sub) use ($startDate, $endDate) {
-                      $sub->where('specific_date', '<=', $startDate)
-                          ->where('end_date', '>=', $endDate);
-                  });
+                // For holidays (range)
+                $q->where(function($sub) use ($startDate, $endDate) {
+                    $sub->where('type', 'holiday')
+                        ->where(function($h) use ($startDate, $endDate) {
+                            $h->whereBetween('specific_date', [$startDate, $endDate])
+                              ->orWhereBetween('end_date', [$startDate, $endDate])
+                              ->orWhere(function($inner) use ($startDate, $endDate) {
+                                  $inner->where('specific_date', '<=', $startDate)
+                                        ->where('end_date', '>=', $endDate);
+                              });
+                        });
+                })
+                // For emergency (specific date)
+                ->orWhere(function($sub) use ($startDate, $endDate) {
+                    $sub->where('type', 'emergency')
+                        ->whereBetween('specific_date', [$startDate->format('Y-m-d'), $endDate->format('Y-m-d')]);
+                });
             })
             ->get();
 
@@ -814,6 +834,7 @@ class BookingController extends Controller
                 return \Carbon\Carbon::parse($item->booking_date)->format('Y-m-d');
             });
 
+        $serverNow = Carbon::now();
         $daysMap = [
             'Monday' => 'Senin', 'Tuesday' => 'Selasa', 'Wednesday' => 'Rabu',
             'Thursday' => 'Kamis', 'Friday' => 'Jumat', 'Saturday' => 'Sabtu', 'Sunday' => 'Minggu',
@@ -824,15 +845,20 @@ class BookingController extends Controller
             $dayOfWeekEn = $currentDate->locale('en')->dayName;
             $dayOfWeek = $daysMap[$dayOfWeekEn] ?? $dayOfWeekEn;
 
-            // A. Check Holiday
-            $isHoliday = $holidays->filter(function($h) use ($currentDate) {
-                $start = Carbon::parse($h->specific_date);
-                $end = Carbon::parse($h->end_date);
-                return $currentDate->between($start, $end);
+            // A. Check Closure (Holiday or Emergency)
+            $isClosed = $closures->filter(function($c) use ($currentDate) {
+                if ($c->type === 'holiday') {
+                    $start = Carbon::parse($c->specific_date);
+                    $end = Carbon::parse($c->end_date);
+                    return $currentDate->between($start, $end);
+                } else {
+                    // Emergency is specific date
+                    return $currentDate->isSameDay(Carbon::parse($c->specific_date));
+                }
             })->isNotEmpty();
 
-            if ($isHoliday) {
-                $results[$dateStr] = 'unavailable'; // Holiday
+            if ($isClosed) {
+                $results[$dateStr] = 'unavailable'; // Closed/Holiday
                 $currentDate->addDay();
                 continue;
             }
@@ -859,9 +885,8 @@ class BookingController extends Controller
                 $startSlot = $currentSlot->copy();
                 $endSlotWithBreak = $startSlot->copy()->addMinutes($duration + $breakTime);
                 
-                // CRITICAL FIX: If checking TODAY, ensure slot is in usage future
-                // Comparison must be strict.
-                if ($currentDate->isSameDay(Carbon::now()) && $startSlot->lessThan(Carbon::now()->addMinutes(30))) {
+                // BUG FIX: Gunakan copy() atau instance now yang stabil di luar loop
+                if ($currentDate->isSameDay($serverNow) && $startSlot->lessThan($serverNow->copy()->addMinutes(30))) {
                      $currentSlot->addMinutes($interval);
                      continue;
                 }

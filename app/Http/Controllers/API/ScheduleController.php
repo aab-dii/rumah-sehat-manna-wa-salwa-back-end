@@ -6,8 +6,11 @@ use App\Helpers\ResponseFormatter;
 use App\Http\Controllers\Controller;
 use App\Models\Schedule;
 use App\Models\User;
+use App\Services\FcmService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Carbon\Carbon;
 
 class ScheduleController extends Controller
 {
@@ -68,7 +71,7 @@ class ScheduleController extends Controller
             'Jadwal berhasil disimpan'
         );
     }
-    // Emergency Close for a specific date (Today)
+    // Emergency Close for a specific date
     public function emergencyClose(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -89,39 +92,59 @@ class ScheduleController extends Controller
         $date = $request->date;
         $reason = $request->reason;
 
-        // 1. Create/Update Schedule for specific date to set is_active = false
-        $dayOfWeekEn = \Carbon\Carbon::parse($date)->locale('en')->dayName;
-        $daysMap = [
-            'Monday' => 'Senin', 'Tuesday' => 'Selasa', 'Wednesday' => 'Rabu',
-            'Thursday' => 'Kamis', 'Friday' => 'Jumat', 'Saturday' => 'Sabtu', 'Sunday' => 'Minggu',
-        ];
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($therapistId, $date, $reason) {
+            // 1. Mark Schedule as inactive/emergency (Per-therapist closure)
+            Schedule::updateOrCreate(
+                ['therapist_id' => $therapistId, 'specific_date' => $date],
+                [
+                    'is_active' => false, 
+                    'type' => 'emergency', 
+                    'note' => $reason, 
+                    'start_time' => '00:00', 
+                    'end_time' => '00:00',
+                    'location_type' => 'clinic'
+                ]
+            );
 
-        // We create a "Specific Date" schedule override if your system supports it. 
-        // Based on model, we have `specific_date`.
-        // If Model doesn't support specific_date logic in `availableSlots`, this won't block future bookings.
-        // BUT, the user's immediate request is "Cancel all bookings today".
-        // Let's stick to cancelling bookings primarily. 
-        
-        // 2. Cancel all ACTIVE bookings for that day
-        $bookings = \App\Models\Booking::where('therapist_id', $therapistId)
-            ->where('booking_date', $date)
-            ->whereIn('status', ['pending', 'confirmed', 'menunggu', 'konfirmasi']) // Active statuses
-            ->get();
+            // 2. Find and cancel bookings for this therapist
+            $bookings = \App\Models\Booking::where('booking_date', $date)
+                ->where('therapist_id', $therapistId)
+                ->whereIn('status', ['pending', 'confirmed', 'menunggu', 'konfirmasi', 'terjadwal'])
+                ->with(['patient', 'service'])
+                ->get();
 
-        $count = 0;
-        foreach ($bookings as $booking) {
-            $booking->update([
-                'status' => 'cancelled', // or 'batal'
-                'cancellation_reason' => $reason
-            ]);
-            $count++;
-        }
+            $count = 0;
+            foreach ($bookings as $booking) {
+                $booking->update([
+                    'status' => 'canceled',
+                    'cancellation_reason' => "Tutup Darurat: $reason"
+                ]);
 
-        return ResponseFormatter::success(
-            ['cancelled_count' => $count],
-            "Berhasil menutup jadwal. $count booking telah dibatalkan."
-        );
+                // 3. Send Notification
+                if ($booking->patient && $booking->patient->fcm_token) {
+                    \App\Services\FcmService::send(
+                        to: $booking->patient->fcm_token,
+                        title: "Pembatalan Darurat Terapis \u{26A0}\u{FE0F}",
+                        body: "Mohon maaf, janji temu Anda dengan terapis kami pada " . Carbon::parse($date)->translatedFormat('d F Y') . " dibatalkan karena keadaan darurat: $reason",
+                        data: [
+                            'type' => 'emergency_cancellation',
+                            'booking_id' => (string) $booking->id
+                        ],
+                        type: 'emergency_cancellation',
+                        userId: $booking->patient_id,
+                        role: 'pasien'
+                    );
+                }
+                $count++;
+            }
+
+            return ResponseFormatter::success(
+                ['cancelled_count' => $count],
+                "Berhasil menutup jadwal. $count booking telah dibatalkan dan pasien telah dinotifikasi."
+            );
+        });
     }
+
     // Add Holiday (Date Range)
     public function addHoliday(Request $request)
     {
@@ -145,41 +168,56 @@ class ScheduleController extends Controller
         $endDate = \Carbon\Carbon::parse($request->end_date);
         $reason = $request->reason;
 
-        // 1. Create SINGLE Schedule record for the Holiday Range
-        // specific_date as Start Date, end_date as End Date.
-        Schedule::create([
-            'therapist_id' => $therapistId,
-            'specific_date' => $startDate->format('Y-m-d'), // Start Date
-            'end_date' => $endDate->format('Y-m-d'),       // End Date
-            'is_active' => false,
-            'type' => 'holiday',
-            'note' => $reason,
-            'day' => null, // Holidays don't stick to a day name
-            'start_time' => '00:00',
-            'end_time' => '00:00',
-            'location_type' => 'clinic',
-        ]);
-
-        // 2. Cancel Bookings for this range
-        $countBookingCancelled = 0;
-        
-        // Find bookings in range
-        $bookings = \App\Models\Booking::where('therapist_id', $therapistId)
-            ->whereBetween('booking_date', [$startDate->format('Y-m-d'), $endDate->format('Y-m-d')])
-            ->whereIn('status', ['pending', 'confirmed', 'menunggu', 'konfirmasi'])
-            ->get();
-
-        foreach ($bookings as $booking) {
-            $booking->update([
-                'status' => 'cancelled',
-                'cancellation_reason' => "Jadwal Libur: " . $reason
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($therapistId, $startDate, $endDate, $reason) {
+            // 1. Create Holiday Record
+            Schedule::create([
+                'therapist_id' => $therapistId,
+                'specific_date' => $startDate->format('Y-m-d'),
+                'end_date' => $endDate->format('Y-m-d'),
+                'is_active' => false,
+                'type' => 'holiday',
+                'note' => $reason,
+                'start_time' => '00:00',
+                'end_time' => '00:00',
+                'location_type' => 'clinic',
             ]);
-            $countBookingCancelled++;
-        }
 
-        return ResponseFormatter::success(
-            ['cancelled_bookings' => $countBookingCancelled],
-            "Jadwal libur berhasil ditambahkan dari " . $startDate->format('Y-m-d') . " sampai " . $endDate->format('Y-m-d')
-        );
+            // 2. Find and cancel bookings
+            $bookings = \App\Models\Booking::where('therapist_id', $therapistId)
+                ->whereBetween('booking_date', [$startDate->format('Y-m-d'), $endDate->format('Y-m-d')])
+                ->whereIn('status', ['pending', 'confirmed', 'menunggu', 'konfirmasi', 'terjadwal'])
+                ->with(['patient', 'service'])
+                ->get();
+
+            $count = 0;
+            foreach ($bookings as $booking) {
+                $booking->update([
+                    'status' => 'canceled',
+                    'cancellation_reason' => "Jadwal Libur Terapis: $reason"
+                ]);
+
+                // 3. Send Notification
+                if ($booking->patient && $booking->patient->fcm_token) {
+                    \App\Services\FcmService::send(
+                        to: $booking->patient->fcm_token,
+                        title: "Jadwal Terapis Libur \u{1F3D6}\u{FE0F}",
+                        body: "Janji temu Anda pada " . Carbon::parse($booking->booking_date)->translatedFormat('d F Y') . " dibatalkan karena terapis sedang libur: $reason",
+                        data: [
+                            'type' => 'holiday_cancellation',
+                            'booking_id' => (string) $booking->id
+                        ],
+                        type: 'holiday_cancellation',
+                        userId: $booking->patient_id,
+                        role: 'pasien'
+                    );
+                }
+                $count++;
+            }
+
+            return ResponseFormatter::success(
+                ['cancelled_bookings' => $count],
+                "Jadwal libur berhasil ditambahkan. $count booking telah dibatalkan dan pasien telah dinotifikasi."
+            );
+        });
     }
 }
