@@ -30,6 +30,7 @@ class BookingDetailResource extends JsonResource
                 'payment_remaining_seconds' => $this->payment_deadline 
                     ? (int) max(0, Carbon::now()->diffInSeconds(Carbon::parse($this->payment_deadline), false)) 
                     : 0,
+                'is_expired_warning' => $this->status === 'pending' && $this->payment_deadline && Carbon::now()->greaterThan(Carbon::parse($this->payment_deadline)),
                 'updated_at' => $this->updated_at,
             ],
         

@@ -43,6 +43,7 @@ class TherapyRecordController extends Controller
                         'id'           => $record->booking->id,
                         'booking_date' => $record->booking->booking_date,
                         'booking_time' => $record->booking->booking_time,
+                        'status'       => $record->booking->status,
                         'service'      => $record->booking->service ? [
                             'name'           => $record->booking->service->name,
                             'full_image_url' => $record->booking->service->full_image_url,
@@ -176,5 +177,45 @@ class TherapyRecordController extends Controller
 
             return ResponseFormatter::success($record, 'Rekam medis berhasil disimpan dan janji temu diselesaikan');
         });
+    }
+
+    public function update(Request $request, $id)
+    {
+        $user = Auth::user();
+        
+        // 1. Temukan rekam medis dengan relasi booking
+        $record = TherapyRecord::with('booking')->find($id);
+
+        if (!$record) {
+            return ResponseFormatter::error(null, 'Rekam medis tidak ditemukan', 404);
+        }
+
+        // 2. Security Check: Mencegah manipulasi ID via Postman
+        // Hanya Admin atau Terapis yang membuat catatan tersebut yang boleh mengedit
+        if ($user->role !== 'admin' && $record->therapist_id !== $user->id) {
+            return ResponseFormatter::error(null, 'Akses ditolak. Anda tidak berhak mengubah catatan ini.', 403);
+        }
+
+        // 3. LOCK CHECK (Sprint 1.4 Poin 10)
+        // Jika status booking adalah 'completed', maka catatan dikunci
+        if ($record->booking && $record->booking->status === 'completed') {
+            return ResponseFormatter::error(
+                null, 
+                'Akses ditolak. Catatan terapi telah dikunci karena sesi telah selesai.', 
+                403
+            );
+        }
+
+        // 4. Validasi Data
+        $validated = $request->validate([
+            'patient_complaint' => 'sometimes|string',
+            'therapist_action' => 'sometimes|string',
+            'additional_notes' => 'sometimes|nullable|string',
+        ]);
+
+        // 5. Eksekusi Update
+        $record->update($validated);
+
+        return ResponseFormatter::success($record, 'Rekam medis berhasil diperbarui');
     }
 }

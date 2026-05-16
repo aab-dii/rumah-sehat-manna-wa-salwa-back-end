@@ -67,6 +67,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     Route::get('therapy-records', [\App\Http\Controllers\API\TherapyRecordController::class, 'all']);
     Route::post('therapy-records', [\App\Http\Controllers\API\TherapyRecordController::class, 'store']);
+    Route::post('therapy-records/{id}', [\App\Http\Controllers\API\TherapyRecordController::class, 'update']);
 
     // Notifications
     Route::get('notifications', [NotificationController::class, 'index']);

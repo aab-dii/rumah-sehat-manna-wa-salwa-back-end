@@ -74,6 +74,11 @@ class User extends Authenticatable
         return $this->hasMany(Booking::class, 'therapist_id');
     }
 
+    public function schedules()
+    {
+        return $this->hasMany(Schedule::class, 'therapist_id');
+    }
+
     protected $appends = [
         'profile_photo_url',
     ];

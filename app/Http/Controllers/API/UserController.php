@@ -35,6 +35,13 @@ class UserController extends Controller
 
         if ($role) {
             $users->where('role', $role);
+
+            // Sprint 1.4: Sembunyikan terapis tanpa jadwal aktif (Khusus untuk tampilan Pasien)
+            if ($role === 'terapis' && $request->user()->role === 'pasien') {
+                $users->whereHas('schedules', function ($query) {
+                    $query->where('is_active', true);
+                });
+            }
         }
 
         // Support fetching soft-deleted users
