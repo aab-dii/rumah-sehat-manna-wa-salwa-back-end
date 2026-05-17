@@ -18,7 +18,10 @@ Route::post('user/sync-firebase', [AuthController::class, 'syncFirebase'])->midd
 
 Route::get('services', [ServiceController::class, 'all']);
 
-Route::middleware('auth:sanctum')->group(function () {
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTHENTICATED ROUTES (Sprint 2.1: + ensureActive untuk cek akun aktif)
+// ═══════════════════════════════════════════════════════════════════════════
+Route::middleware(['auth:sanctum', 'ensureActive'])->group(function () {
     Route::get('user', [AuthController::class, 'fetch']);
     Route::post('user/update', [AuthController::class, 'updateProfile']);
     Route::post('logout', [AuthController::class, 'logout']);
@@ -75,6 +78,23 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('notifications/{id}/read', [NotificationController::class, 'markAsRead']);
     Route::post('notifications/read-all', [NotificationController::class, 'markAllRead']);
     Route::delete('notifications/{id}', [NotificationController::class, 'destroy']);
+
+    // ═════════════════════════════════════════════════════════════════════
+    // SUPER ADMIN ONLY (Sprint 2.1)
+    // ═════════════════════════════════════════════════════════════════════
+    Route::middleware('isSuperAdmin')->prefix('super-admin')->group(function () {
+        // Kelola akun admin (Sprint 2.1)
+        Route::get('admins', [\App\Http\Controllers\API\SuperAdminController::class, 'index']);
+        Route::post('admins', [\App\Http\Controllers\API\SuperAdminController::class, 'store']);
+        Route::put('admins/{id}', [\App\Http\Controllers\API\SuperAdminController::class, 'update']);
+        Route::post('admins/{id}/toggle-active', [\App\Http\Controllers\API\SuperAdminController::class, 'toggleActive']);
+        Route::post('admins/{id}/reset-password', [\App\Http\Controllers\API\SuperAdminController::class, 'resetPassword']);
+    });
+
+    // ═════════════════════════════════════════════════════════════════════
+    // LAPORAN — Admin & Super Admin (Sprint 2.1)
+    // ═════════════════════════════════════════════════════════════════════
+    Route::middleware('isAdmin')->prefix('reports')->group(function () {
+        // Placeholder: endpoint laporan akan diimplementasi di tahap selanjutnya
+    });
 });
-
-

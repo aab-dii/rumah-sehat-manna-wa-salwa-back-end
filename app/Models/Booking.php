@@ -20,6 +20,7 @@ class Booking extends Model
         'cancellation_reason',
         'payment_deadline',
         'reminder_sent_at',
+        'handled_by',       // Sprint 2.1: audit trail admin yang menangani
     ];
 
     protected $casts = [
@@ -55,6 +56,14 @@ class Booking extends Model
     public function therapyRecord()
     {
         return $this->hasOne(TherapyRecord::class);
+    }
+
+    /**
+     * Sprint 2.1: Relasi ke admin yang menangani booking ini.
+     */
+    public function handledBy()
+    {
+        return $this->belongsTo(User::class, 'handled_by');
     }
 
     protected static function booted()

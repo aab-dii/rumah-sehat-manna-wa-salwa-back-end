@@ -21,8 +21,8 @@ class UserController extends Controller
     {
         $role = $request->input('role');
 
-        // Authorization check: Hanya admin yang bisa melihat daftar user (kecuali jika mencari list terapis)
-        if ($request->user()->role !== 'admin') {
+        // Authorization check: Admin & Super Admin bisa melihat semua, selain itu hanya terapis
+        if (!$request->user()->isAdminOrSuperAdmin()) {
             if ($role !== 'terapis') {
                 return ResponseFormatter::error(null, 'Hanya admin yang dapat mengakses daftar user', 403);
             }
@@ -63,24 +63,43 @@ class UserController extends Controller
     /**
      * Store a newly created resource in storage.
      */
-    public function store(Request $request)
+    public function store(Request $request, \Kreait\Firebase\Contract\Auth $firebaseAuth)
     {
-        try {
-            // Ensure only admin can create
-            if ($request->user()->role !== 'admin') {
-                return ResponseFormatter::error(null, 'Unauthorized', 403);
-            }
+        // 1. Ensure only admin/super_admin can create
+        if (!$request->user()->isAdminOrSuperAdmin()) {
+            return ResponseFormatter::error(null, 'Unauthorized', 403);
+        }
 
-            $request->validate([
-                'nama_lengkap' => ['required', 'string', 'max:255'],
-                'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
-                'password' => ['required', 'string', 'min:8'],
-                'no_hp' => ['required', 'string', 'max:20'],
-                'firebase_uid' => ['required', 'string'],
-                'role' => ['required', 'string'],
+        $request->validate([
+            'nama_lengkap' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
+            'password' => ['required', 'string', 'min:8'],
+            'no_hp' => ['required', 'string', 'max:20'],
+            'role' => ['required', 'string'],
+        ]);
+
+        // Sprint 2.1: Proteksi role escalation
+        // - Tidak ada yang boleh buat super_admin via endpoint ini
+        // - Hanya super_admin yang boleh buat akun admin
+        if ($request->role === 'super_admin') {
+            return ResponseFormatter::error(null, 'Tidak dapat membuat akun Super Admin melalui endpoint ini.', 403);
+        }
+
+        if ($request->role === 'admin' && !$request->user()->isSuperAdmin()) {
+            return ResponseFormatter::error(null, 'Hanya Super Admin yang dapat membuat akun admin.', 403);
+        }
+
+        $firebaseUser = null;
+
+        try {
+            // 2. Buat akun di Firebase Auth
+            $firebaseUser = $firebaseAuth->createUser([
+                'email'       => $request->email,
+                'password'    => $request->password,
+                'displayName' => $request->nama_lengkap,
             ]);
 
-            // Langsung masukkan data dan tangkap instancenya, tidak perlu where email lagi
+            // 3. Simpan ke database Laravel dengan UID Firebase yang didapat
             $user = User::create([
                 'name' => $request->nama_lengkap,
                 'email' => $request->email,
@@ -88,11 +107,12 @@ class UserController extends Controller
                 'phone_number' => $request->no_hp,
                 'gender' => $request->jenis_kelamin ?? 'L',
                 'role' => $request->role,
-                'firebase_uid' => $request->firebase_uid,
+                'firebase_uid' => $firebaseUser->uid,
                 'job' => $request->pekerjaan,
                 'specialization' => $request->specialization,
                 'address' => $request->alamat,
                 'birth_date' => $request->tgl_lahir,
+                'is_active' => true,
             ]);
 
             // Auto-create Schedule if role is 'terapis'
@@ -111,10 +131,19 @@ class UserController extends Controller
                 }
             }
 
-            return ResponseFormatter::success($user, 'User Created by Admin');
+            return ResponseFormatter::success($user, 'User Created successfully with Firebase integration');
         } catch (\Exception $error) {
+            // Rollback Firebase jika database Laravel gagal menyimpan data
+            if ($firebaseUser) {
+                try {
+                    $firebaseAuth->deleteUser($firebaseUser->uid);
+                } catch (\Exception $rollbackError) {
+                    \Illuminate\Support\Facades\Log::error('Firebase Rollback Failed in UserController: ' . $rollbackError->getMessage());
+                }
+            }
+
             return ResponseFormatter::error([
-                'message' => 'Something went wrong',
+                'message' => 'Something went wrong during creation',
                 'error' => $error->getMessage(),
             ], 'Creation Failed', 500);
         }
@@ -147,7 +176,7 @@ class UserController extends Controller
     public function update(Request $request, $id)
     {
         try {
-            if ($request->user()->role !== 'admin') {
+            if (!$request->user()->isAdminOrSuperAdmin()) {
                 return ResponseFormatter::error(null, 'Unauthorized', 403);
             }
 
@@ -202,8 +231,8 @@ class UserController extends Controller
      */
     public function destroy($id)
     {
-        // Security check: Hanya admin yang dapat menghapus user
-        if (Auth::user()->role !== 'admin') {
+        // Security check: Hanya admin/super_admin yang dapat menghapus user
+        if (!Auth::user()->isAdminOrSuperAdmin()) {
             return ResponseFormatter::error(null, 'Hanya admin yang dapat menonaktifkan user', 403);
         }
 
@@ -211,6 +240,19 @@ class UserController extends Controller
 
         if (!$user) {
             return ResponseFormatter::error(null, 'User tidak ditemukan', 404);
+        }
+
+        // Sprint 2.1: Tidak boleh hapus diri sendiri
+        if ($user->id === Auth::id()) {
+            return ResponseFormatter::error(null, 'Tidak dapat menghapus akun Anda sendiri.', 403);
+        }
+
+        // Sprint 2.1: Tidak boleh hapus super_admin terakhir
+        if ($user->isSuperAdmin()) {
+            $activeSuperAdminCount = User::where('role', 'super_admin')->whereNull('deleted_at')->count();
+            if ($activeSuperAdminCount <= 1) {
+                return ResponseFormatter::error(null, 'Tidak dapat menghapus Super Admin terakhir.', 409);
+            }
         }
 
         // Validasi: Jika terapis, cek apakah ada booking aktif (pending/confirmed)
@@ -228,6 +270,10 @@ class UserController extends Controller
             }
         }
 
+        // Sprint 2.1: Hapus token & FCM sebelum soft delete
+        $user->tokens()->delete();
+        $user->update(['fcm_token' => null]);
+
         $user->delete();
 
         return ResponseFormatter::success(null, 'User berhasil dinonaktifkan (Soft Delete)');
@@ -238,8 +284,8 @@ class UserController extends Controller
      */
     public function restore($id)
     {
-        // Security check: Hanya admin yang dapat restore user
-        if (Auth::user()->role !== 'admin') {
+        // Security check: Hanya admin/super_admin yang dapat restore user
+        if (!Auth::user()->isAdminOrSuperAdmin()) {
             return ResponseFormatter::error(null, 'Hanya admin yang dapat mengaktifkan kembali user', 403);
         }
 

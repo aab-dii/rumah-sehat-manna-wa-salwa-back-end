@@ -36,6 +36,8 @@ class User extends Authenticatable
         'profile_photo_path',
         'photo_url',
         'fcm_token',
+        'is_active',        // Sprint 2.1: nonaktifkan akun tanpa hapus
+        'last_active_at',   // Sprint 2.1: tracking aktivitas terakhir
     ];
 
     /**
@@ -62,7 +64,65 @@ class User extends Authenticatable
             'birth_date' => 'string',
             'specialization' => 'array',
             'password' => 'hashed',
+            'is_active' => 'boolean',           // Sprint 2.1
+            'last_active_at' => 'datetime',     // Sprint 2.1
         ];
+    }
+
+    // =========================================================================
+    // SCOPES (Sprint 2.1)
+    // =========================================================================
+
+    /**
+     * Scope: hanya user yang aktif.
+     */
+    public function scopeActive($query)
+    {
+        return $query->where('is_active', true);
+    }
+
+    /**
+     * Scope: hanya user dengan role admin atau super_admin.
+     */
+    public function scopeAdmins($query)
+    {
+        return $query->whereIn('role', ['admin', 'super_admin']);
+    }
+
+    // =========================================================================
+    // HELPER METHODS (Sprint 2.1)
+    // =========================================================================
+
+    /**
+     * Cek apakah user adalah super admin.
+     */
+    public function isSuperAdmin(): bool
+    {
+        return $this->role === 'super_admin';
+    }
+
+    /**
+     * Cek apakah user adalah admin biasa.
+     */
+    public function isAdmin(): bool
+    {
+        return $this->role === 'admin';
+    }
+
+    /**
+     * Cek apakah user adalah admin atau super admin.
+     */
+    public function isAdminOrSuperAdmin(): bool
+    {
+        return in_array($this->role, ['admin', 'super_admin']);
+    }
+
+    /**
+     * Cek apakah akun user aktif (tidak dinonaktifkan).
+     */
+    public function isActive(): bool
+    {
+        return $this->is_active !== 0 && $this->is_active !== false && $this->is_active !== '0';
     }
     public function medicalRecords()
     {

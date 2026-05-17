@@ -545,8 +545,8 @@ class BookingController extends Controller
 
     public function rejectPayment(Request $request, $id)
     {
-        // Security: Hanya admin yang boleh menolak pembayaran
-        if (Auth::user()->role !== 'admin') {
+        // Security: Hanya admin/super_admin yang boleh menolak pembayaran
+        if (!Auth::user()->isAdminOrSuperAdmin()) {
             return ResponseFormatter::error(null, 'Akses ditolak. Hanya admin yang dapat memproses pembayaran.', 403);
         }
 
@@ -562,25 +562,32 @@ class BookingController extends Controller
 
         $transaction = $booking->transaction;
 
-        if ($transaction) {
-            $transaction->update([
-                'status' => 'rejected', 
-                'rejection_note' => $request->rejection_note
-            ]);
-            
-            // Broadcast Event
-            event(new \App\Events\BookingStatusUpdated($booking->fresh()));
-            
-            // Note: Booking status remains 'pending' so user can see the rejection and re-upload.
-            // Or should we update booking to 'menunggu'? 'pending' covers it.
-        } else {
-             return ResponseFormatter::error(null, 'Transaksi tidak ditemukan', 404);
+        if (!$transaction) {
+            return ResponseFormatter::error(null, 'Transaksi tidak ditemukan', 404);
         }
 
+        // Sprint 2.1: Proteksi double action — cek apakah sudah diproses admin lain
+        if ($transaction->status === 'rejected') {
+            return ResponseFormatter::error(null, 'Pembayaran ini sudah ditolak sebelumnya.', 409);
+        }
+        if ($transaction->status === 'paid') {
+            return ResponseFormatter::error(null, 'Pembayaran ini sudah diterima oleh admin lain.', 409);
+        }
+
+        $transaction->update([
+            'status' => 'rejected', 
+            'rejection_note' => $request->rejection_note
+        ]);
+
+        // Sprint 2.1: Simpan audit trail
+        $booking->update(['handled_by' => Auth::id()]);
+            
+        // Broadcast Event
         try {
+            event(new \App\Events\BookingStatusUpdated($booking->fresh()));
             event(new MyEvent($booking));
         } catch (\Exception $e) {
-             \Log::error("Pusher Event Failed: " . $e->getMessage());
+            \Log::error("Pusher Event Failed: " . $e->getMessage());
         }
 
         return ResponseFormatter::success($booking->load('transaction'), 'Pembayaran berhasil ditolak');
@@ -588,8 +595,8 @@ class BookingController extends Controller
 
     public function acceptPayment(Request $request, $id)
     {
-        // Security: Hanya admin yang boleh menerima pembayaran
-        if (Auth::user()->role !== 'admin') {
+        // Security: Hanya admin/super_admin yang boleh menerima pembayaran
+        if (!Auth::user()->isAdminOrSuperAdmin()) {
             return ResponseFormatter::error(null, 'Akses ditolak. Hanya admin yang dapat memproses pembayaran.', 403);
         }
 
@@ -605,15 +612,24 @@ class BookingController extends Controller
             return ResponseFormatter::error(null, 'Transaksi tidak ditemukan', 404);
         }
 
+        // Sprint 2.1: Proteksi double action
+        if ($transaction->status === 'paid') {
+            return ResponseFormatter::error(null, 'Pembayaran ini sudah diterima sebelumnya.', 409);
+        }
+        if ($booking->status === 'confirmed') {
+            return ResponseFormatter::error(null, 'Booking ini sudah dikonfirmasi oleh admin lain.', 409);
+        }
+
         // 1. Update status transaksi menjadi 'paid'
         $transaction->update([
             'status'         => 'paid',
             'rejection_note' => null,
         ]);
 
-        // 2. Update status booking menjadi 'confirmed'
+        // 2. Update status booking menjadi 'confirmed' + audit trail
         $booking->update([
-            'status' => 'confirmed',
+            'status'     => 'confirmed',
+            'handled_by' => Auth::id(), // Sprint 2.1: audit trail
         ]);
 
         // 3. Broadcast event agar pasien mendapat notifikasi real-time
