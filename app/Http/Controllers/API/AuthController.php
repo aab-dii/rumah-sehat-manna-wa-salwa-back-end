@@ -257,4 +257,86 @@ class AuthController extends Controller
         $user->update(['fcm_token' => $request->fcm_token]);
         return ResponseFormatter::success(['fcm_token' => $user->fcm_token], 'Token berhasil diperbarui');
     }
+
+    public function forgotPassword(Request $request)
+    {
+        $request->validate([
+            'email' => 'required|email'
+        ]);
+
+        $user = User::where('email', $request->email)->first();
+
+        if (!$user) {
+            return ResponseFormatter::error(null, 'Email tidak terdaftar di sistem kami.', 404);
+        }
+
+        if ($user->role !== 'pasien') {
+            return ResponseFormatter::error(null, 'Akun staf (Terapis/Admin) tidak dapat direset mandiri. Silakan hubungi Super Admin klinik.', 403);
+        }
+
+        try {
+            $firebaseUser = $this->firebaseAuth->getUserByEmail($request->email);
+            
+            // Periksa metode login (provider)
+            $isGoogle = false;
+            foreach ($firebaseUser->providerData as $provider) {
+                if ($provider->providerId === 'google.com') {
+                    $isGoogle = true;
+                    break;
+                }
+            }
+
+            if ($isGoogle) {
+                return ResponseFormatter::error(
+                    null, 
+                    "Akun ini terdaftar menggunakan Google.\nSilakan gunakan tombol 'Lanjutkan dengan Google' untuk masuk ke aplikasi.", 
+                    403
+                );
+            }
+        } catch (\Kreait\Firebase\Exception\Auth\UserNotFound $e) {
+            return ResponseFormatter::error(null, 'Email tidak terdaftar di sistem kami.', 404);
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Forgot Password Firebase Error: ' . $e->getMessage());
+            return ResponseFormatter::error(null, 'Gagal memvalidasi status akun.', 500);
+        }
+
+        return ResponseFormatter::success(null, 'Validasi berhasil, email reset siap dikirim.');
+    }
+
+    public function changePassword(Request $request)
+    {
+        $request->validate([
+            'old_password' => 'required',
+            'new_password' => 'required|min:8'
+        ]);
+
+        $user = Auth::user();
+
+        if (!Hash::check($request->old_password, $user->password)) {
+            return ResponseFormatter::error(null, 'Password lama tidak sesuai.', 422);
+        }
+
+        try {
+            if ($user->firebase_uid) {
+                $this->firebaseAuth->changeUserPassword($user->firebase_uid, $request->new_password);
+            }
+
+            $user->update([
+                'password' => Hash::make($request->new_password)
+            ]);
+
+            $user->tokens()->delete();
+
+            return ResponseFormatter::success(null, 'Password berhasil diubah. Silakan login kembali.');
+        } catch (\Kreait\Firebase\Exception\Auth\WeakPassword $e) {
+            return ResponseFormatter::error(null, 'Password terlalu lemah, minimal 8 karakter dengan kombinasi huruf dan angka.', 422);
+        } catch (\Exception $e) {
+            Log::error('Change Password Error: ' . $e->getMessage());
+            return ResponseFormatter::error(
+                ['error' => $e->getMessage()],
+                'Gagal mengubah password. Silakan coba lagi nanti.',
+                500
+            );
+        }
+    }
 }

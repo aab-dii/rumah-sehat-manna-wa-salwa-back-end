@@ -299,4 +299,70 @@ class UserController extends Controller
 
         return ResponseFormatter::success($user, 'User berhasil diaktifkan kembali');
     }
+
+    /**
+     * Reset password oleh admin biasa.
+     * Hanya bisa reset pasien dan terapis.
+     */
+    public function resetPassword(Request $request, $id, \Kreait\Firebase\Contract\Auth $firebaseAuth, \App\Services\FcmService $fcmService)
+    {
+        if (!Auth::user()->isAdminOrSuperAdmin()) {
+            return ResponseFormatter::error(null, 'Unauthorized', 403);
+        }
+
+        $target = User::find($id);
+
+        if (!$target) {
+            return ResponseFormatter::error(null, 'User tidak ditemukan', 404);
+        }
+
+        // Admin biasa HANYA bisa reset pasien dan terapis
+        if (!in_array($target->role, ['pasien', 'terapis'])) {
+            return ResponseFormatter::error(null, 'Admin hanya dapat mereset password pasien dan terapis.', 403);
+        }
+
+        // Tidak boleh reset diri sendiri
+        if ($target->id === Auth::id()) {
+            return ResponseFormatter::error(null, 'Tidak dapat mereset password Anda sendiri. Gunakan menu profil.', 403);
+        }
+
+        // Generate password 12 karakter kombinasi huruf besar, kecil, angka
+        $tempPassword = \Illuminate\Support\Str::random(12);
+
+        try {
+            if ($target->firebase_uid) {
+                $firebaseAuth->changeUserPassword($target->firebase_uid, $tempPassword);
+            }
+
+            $target->update([
+                'password' => Hash::make($tempPassword),
+                'password_reset_by' => Auth::id(),
+                'password_reset_at' => now(),
+            ]);
+
+            $target->tokens()->delete();
+
+            // Kirim notifikasi FCM
+            if ($target->fcm_token) {
+                $fcmService->sendNotification(
+                    $target->fcm_token,
+                    'Password Direset',
+                    'Password Anda telah direset oleh Admin. Hubungi klinik untuk mendapatkan password baru.',
+                    ['type' => 'password_reset']
+                );
+            }
+
+            return ResponseFormatter::success(
+                ['temporary_password' => $tempPassword],
+                'Password berhasil direset. Berikan password sementara ini kepada user.'
+            );
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Reset Password Failed: ' . $e->getMessage());
+            return ResponseFormatter::error(
+                ['error' => $e->getMessage()],
+                'Gagal mereset password. Silakan coba lagi.',
+                500
+            );
+        }
+    }
 }

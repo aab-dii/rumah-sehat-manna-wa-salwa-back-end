@@ -201,7 +201,7 @@ class SuperAdminController extends Controller
      * POST /api/super-admin/admins/{id}/reset-password
      * Generate password sementara dan update di Firebase + database.
      */
-    public function resetPassword($id)
+    public function resetPassword($id, \App\Services\FcmService $fcmService)
     {
         $target = User::find($id);
 
@@ -209,18 +209,13 @@ class SuperAdminController extends Controller
             return ResponseFormatter::error(null, 'User tidak ditemukan', 404);
         }
 
-        // Hanya bisa reset admin & terapis (bukan super_admin atau pasien)
-        if (!in_array($target->role, ['admin', 'terapis'])) {
-            return ResponseFormatter::error(null, 'Hanya password admin dan terapis yang dapat direset.', 403);
-        }
-
         // Tidak boleh reset password diri sendiri
         if ($target->id === Auth::id()) {
             return ResponseFormatter::error(null, 'Tidak dapat mereset password Anda sendiri. Gunakan menu profil.', 403);
         }
 
-        // Generate password sementara (8 karakter random)
-        $tempPassword = Str::random(8);
+        // Generate password sementara (12 karakter random)
+        $tempPassword = Str::random(12);
 
         try {
             // 1. Update di Firebase
@@ -231,10 +226,22 @@ class SuperAdminController extends Controller
             // 2. Update di database
             $target->update([
                 'password' => Hash::make($tempPassword),
+                'password_reset_by' => Auth::id(),
+                'password_reset_at' => now(),
             ]);
 
             // 3. Hapus semua token agar user dipaksa login ulang
             $target->tokens()->delete();
+
+            // 4. Kirim notifikasi FCM
+            if ($target->fcm_token) {
+                $fcmService->sendNotification(
+                    $target->fcm_token,
+                    'Password Direset',
+                    'Password Anda telah direset oleh Super Admin. Hubungi klinik untuk mendapatkan password baru.',
+                    ['type' => 'password_reset']
+                );
+            }
 
             return ResponseFormatter::success(
                 ['temporary_password' => $tempPassword],

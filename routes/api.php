@@ -14,6 +14,7 @@ use App\Services\FcmService;
 
 Route::post('register', [AuthController::class, 'register']);
 Route::post('login', [AuthController::class, 'login'])->middleware('throttle:5,1'); // Maks 5 percobaan per menit per IP
+Route::post('forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:3,1'); // Cegah spam
 Route::post('user/sync-firebase', [AuthController::class, 'syncFirebase'])->middleware('throttle:10,1'); // Maks 10 request per menit
 
 Route::get('services', [ServiceController::class, 'all']);
@@ -24,6 +25,7 @@ Route::get('services', [ServiceController::class, 'all']);
 Route::middleware(['auth:sanctum', 'ensureActive'])->group(function () {
     Route::get('user', [AuthController::class, 'fetch']);
     Route::post('user/update', [AuthController::class, 'updateProfile']);
+    Route::post('user/change-password', [AuthController::class, 'changePassword']);
     Route::post('logout', [AuthController::class, 'logout']);
     Route::post('update-fcm-token', [AuthController::class, 'updateFcmToken']);
 
@@ -34,6 +36,7 @@ Route::middleware(['auth:sanctum', 'ensureActive'])->group(function () {
     Route::post('users/{id}/update', [UserController::class, 'update']);
     Route::delete('users/{id}', [UserController::class, 'destroy']);
     Route::post('users/{id}/restore', [UserController::class, 'restore']);
+    Route::post('users/{id}/reset-password', [UserController::class, 'resetPassword']);
 
     // Services CRUD (Admin)
     Route::post('services', [ServiceController::class, 'store']);
