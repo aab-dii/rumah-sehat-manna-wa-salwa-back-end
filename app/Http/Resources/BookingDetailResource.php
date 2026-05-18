@@ -31,6 +31,8 @@ class BookingDetailResource extends JsonResource
                     ? (int) max(0, Carbon::now()->diffInSeconds(Carbon::parse($this->payment_deadline), false)) 
                     : 0,
                 'is_expired_warning' => $this->status === 'pending' && $this->payment_deadline && Carbon::now()->greaterThan(Carbon::parse($this->payment_deadline)),
+                'queue_number' => $this->queue_number ?? null,
+                'queue_info' => $this->queue_number ? "Antrian ke-{$this->queue_number} hari ini untuk terapis ini" : null,
                 'updated_at' => $this->updated_at,
             ],
         

@@ -42,6 +42,29 @@ class BookingController extends Controller
         $booking = $query->find($id);
 
         if ($booking) {
+            // Kalkulasi antrian (dinamis setiap show)
+            $queueNumber = null;
+            if (in_array($booking->status, ['confirmed', 'in_progress', 'force_completed'])) {
+                try {
+                    $dateString = substr((string)$booking->booking_date, 0, 10);
+                    
+                    $queue = Booking::where('therapist_id', $booking->therapist_id)
+                        ->whereDate('booking_date', $dateString)
+                        ->whereIn('status', ['confirmed', 'in_progress', 'force_completed'])
+                        ->orderBy('booking_time', 'asc')
+                        ->orderBy('created_at', 'asc')
+                        ->pluck('id')
+                        ->toArray();
+                    
+                    $index = array_search($booking->id, $queue);
+                    if ($index !== false) {
+                        $booking->queue_number = $index + 1;
+                    }
+                } catch (\Exception $e) {
+                    \Illuminate\Support\Facades\Log::error('Gagal menghitung antrian: ' . $e->getMessage());
+                }
+            }
+
             // ✅ Gunakan resolve() agar data "rata" (Single Wrapper)
             $data = (new BookingDetailResource($booking))->resolve();
             return ResponseFormatter::success($data, 'Detail Booking berhasil diambil');
