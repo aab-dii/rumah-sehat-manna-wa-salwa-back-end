@@ -15,6 +15,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'isAdmin'        => \App\Http\Middleware\IsAdmin::class,
             'isSuperAdmin'   => \App\Http\Middleware\IsSuperAdmin::class,   // Sprint 2.1
+            'isTerapis'      => \App\Http\Middleware\IsTerapis::class,      // Sprint 3.1
             'ensureActive'   => \App\Http\Middleware\EnsureUserIsActive::class, // Sprint 2.1
         ]);
     })

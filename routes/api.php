@@ -95,9 +95,36 @@ Route::middleware(['auth:sanctum', 'ensureActive'])->group(function () {
     });
 
     // ═════════════════════════════════════════════════════════════════════
-    // LAPORAN — Admin & Super Admin (Sprint 2.1)
+    // LAPORAN — Admin, Super Admin, Terapis (Sprint 3.1)
     // ═════════════════════════════════════════════════════════════════════
+    
+    // Terapis (hanya bisa lihat visits dan performance diri sendiri)
+    Route::middleware('isTerapis')->prefix('reports')->group(function () {
+        Route::get('my-visits', [\App\Http\Controllers\API\ReportController::class, 'getVisits']);
+        Route::get('my-performance', [\App\Http\Controllers\API\ReportController::class, 'getPerformance']);
+        
+        // Export
+        Route::get('export/my-visits', [\App\Http\Controllers\API\ReportPdfController::class, 'exportVisits']);
+        Route::get('export/my-performance', [\App\Http\Controllers\API\ReportPdfController::class, 'exportPerformance']);
+    });
+
+    // Admin & Super Admin (bisa lihat semua, kecuali comparative)
     Route::middleware('isAdmin')->prefix('reports')->group(function () {
-        // Placeholder: endpoint laporan akan diimplementasi di tahap selanjutnya
+        Route::get('financial', [\App\Http\Controllers\API\ReportController::class, 'getFinancial']);
+        Route::get('visits', [\App\Http\Controllers\API\ReportController::class, 'getVisits']);
+        Route::get('therapist-performance', [\App\Http\Controllers\API\ReportController::class, 'getPerformance']);
+        Route::get('clinic-activity', [\App\Http\Controllers\API\ReportController::class, 'getActivity']);
+        
+        // Export
+        Route::get('export/financial', [\App\Http\Controllers\API\ReportPdfController::class, 'exportFinancial']);
+        Route::get('export/visits', [\App\Http\Controllers\API\ReportPdfController::class, 'exportVisits']);
+        Route::get('export/therapist-performance', [\App\Http\Controllers\API\ReportPdfController::class, 'exportPerformance']);
+        Route::get('export/clinic-activity', [\App\Http\Controllers\API\ReportPdfController::class, 'exportActivity']);
+    });
+
+    // Khusus Super Admin
+    Route::middleware('isSuperAdmin')->prefix('reports')->group(function () {
+        Route::get('therapist-comparative', [\App\Http\Controllers\API\ReportController::class, 'getComparative']);
+        Route::get('export/therapist-comparative', [\App\Http\Controllers\API\ReportPdfController::class, 'exportComparative']);
     });
 });
