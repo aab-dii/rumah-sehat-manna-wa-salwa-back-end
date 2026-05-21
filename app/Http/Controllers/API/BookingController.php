@@ -362,6 +362,24 @@ class BookingController extends Controller
                 \Log::error("Notification Failed: " . $e->getMessage());
             }
 
+            // Kirim notifikasi FCM ke semua admin & super admin
+            // saat ada booking baru masuk dari pasien.
+            // Kegagalan pengiriman tidak mempengaruhi
+            // proses pembuatan booking.
+            try {
+                \App\Services\FcmService::sendToAdmins(
+                    '🔔 Janji Temu Baru',
+                    "Pasien {$booking->patient->name} membuat janji temu untuk layanan {$booking->service->name} pada {$bookingDate} pukul {$timeInput}.",
+                    [
+                        'type'       => 'new_booking',
+                        'booking_id' => (string) $booking->id,
+                        'screen'     => 'AdminAppointmentDetail',
+                    ]
+                );
+            } catch (\Exception $e) {
+                \Log::error('FCM ke admin gagal: ' . $e->getMessage());
+            }
+
             return ResponseFormatter::success(
                 $booking,
                 'Booking created successfully'
@@ -416,8 +434,8 @@ class BookingController extends Controller
             return ResponseFormatter::success($booking, 'Status booking berhasil diupdate');
         }
 
-        // Hanya admin yang bisa mengubah data booking secara penuh.
-        if ($user->role !== 'admin') {
+        // Hanya admin/super admin yang bisa mengubah data booking secara penuh.
+        if (!$user->isAdminOrSuperAdmin()) {
             return ResponseFormatter::error(null, 'Akses ditolak.', 403);
         }
 
@@ -449,7 +467,7 @@ class BookingController extends Controller
     public function destroy($id)
     {
         $user = Auth::user();
-        if ($user->role !== 'admin') {
+        if (!$user->isAdminOrSuperAdmin()) {
             return ResponseFormatter::error(null, 'Hanya admin yang dapat menghapus data booking', 403);
         }
 
@@ -488,7 +506,7 @@ class BookingController extends Controller
         // Hanya pemilik booking (pasien) atau admin yang boleh membatalkan.
         // Terapis tidak bisa membatalkan booking — harus lewat admin.
         $isOwner = $booking->patient_id === Auth::id();
-        $isAdmin = $user->role === 'admin';
+        $isAdmin = $user->isAdminOrSuperAdmin();
 
         if (!$isAdmin) {
             return ResponseFormatter::error(null, 'Pembatalan janji temu harus melalui Admin. Silakan hubungi Admin melalui WhatsApp.', 403);
@@ -548,7 +566,7 @@ class BookingController extends Controller
         $booking = \App\Models\Booking::with('transaction')->findOrFail($id);
 
         // 3. Security Check (Cuma pemilik atau admin)
-        if (Auth::id() !== $booking->patient_id && Auth::user()->role !== 'admin') {
+        if (Auth::id() !== $booking->patient_id && !Auth::user()->isAdminOrSuperAdmin()) {
             return ResponseFormatter::error(null, 'Akses ditolak', 403);
         }
 

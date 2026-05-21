@@ -138,8 +138,8 @@ class TherapyRecordController extends Controller
 
         $user = Auth::user();
         
-        // Ensure only Therapist (or Admin) can create
-        if ($user->role !== 'terapis' && $user->role !== 'admin') {
+        // Ensure only Therapist (or Admin/Super Admin) can create
+        if ($user->role !== 'terapis' && !$user->isAdminOrSuperAdmin()) {
              return ResponseFormatter::error(null, 'Hanya Terapis yang dapat membuat rekam medis', 403);
         }
 
@@ -194,8 +194,8 @@ class TherapyRecordController extends Controller
         }
 
         // 2. Security Check: Mencegah manipulasi ID via Postman
-        // Hanya Admin atau Terapis yang membuat catatan tersebut yang boleh mengedit
-        if ($user->role !== 'admin' && $record->therapist_id !== $user->id) {
+        // Hanya Admin/Super Admin atau Terapis yang membuat catatan tersebut yang boleh mengedit
+        if (!$user->isAdminOrSuperAdmin() && $record->therapist_id !== $user->id) {
             return ResponseFormatter::error(null, 'Akses ditolak. Anda tidak berhak mengubah catatan ini.', 403);
         }
 

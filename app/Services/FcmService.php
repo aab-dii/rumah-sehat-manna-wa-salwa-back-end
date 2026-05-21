@@ -130,4 +130,36 @@ class FcmService
             return false;
         }
     }
-}
+
+    /**
+     * Kirim notifikasi FCM ke semua admin & super admin aktif.
+     * Dipakai saat ada booking baru masuk.
+     */
+    public static function sendToAdmins(
+        string $title,
+        string $body,
+        array $data = []
+    ): void {
+        try {
+            $admins = \App\Models\User::whereIn('role', ['admin', 'super_admin'])
+                ->where('is_active', true)
+                ->whereNotNull('fcm_token')
+                ->get();
+
+            foreach ($admins as $admin) {
+                $type = $data['type'] ?? 'new_booking';
+                self::send(
+                    $admin->fcm_token,
+                    $title,
+                    $body,
+                    $data,
+                    $type,
+                    $admin->id,
+                    $admin->role
+                );
+            }
+        } catch (\Exception $e) {
+            Log::error('FcmService::sendToAdmins failed: ' . $e->getMessage());
+        }
+    }
+}

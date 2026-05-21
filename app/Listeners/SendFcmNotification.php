@@ -177,7 +177,7 @@ class SendFcmNotification
      */
     private function notifyAdmins(string $title, string $body, int $bookingId, string $type): void
     {
-        $admins = User::where('role', 'admin')->get();
+        $admins = User::whereIn('role', ['admin', 'super_admin'])->get();
         foreach ($admins as $admin) {
             if ($admin->fcm_token) {
                 FcmService::send(
@@ -187,7 +187,7 @@ class SendFcmNotification
                     ['booking_id' => $bookingId, 'type' => $type],
                     $type,
                     $admin->id,
-                    'admin'
+                    $admin->role
                 );
             }
         }
