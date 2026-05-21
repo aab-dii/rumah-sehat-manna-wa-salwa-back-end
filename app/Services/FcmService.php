@@ -143,7 +143,6 @@ class FcmService
         try {
             $admins = \App\Models\User::whereIn('role', ['admin', 'super_admin'])
                 ->where('is_active', true)
-                ->whereNotNull('fcm_token')
                 ->get();
 
             foreach ($admins as $admin) {
