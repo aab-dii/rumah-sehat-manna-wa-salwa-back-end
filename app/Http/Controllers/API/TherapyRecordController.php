@@ -165,8 +165,11 @@ class TherapyRecordController extends Controller
                 'examination_date'  => now()
             ]);
 
-            // Update status booking menjadi completed secara otomatis
-            $booking->update(['status' => 'completed']);
+            // Update status booking menjadi completed secara otomatis dan catat tanggal selesai
+            $booking->update([
+                'status' => 'completed',
+                'completed_at' => now(),
+            ]);
 
             // Trigger event notifikasi
             try {

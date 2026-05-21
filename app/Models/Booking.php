@@ -21,12 +21,16 @@ class Booking extends Model
         'payment_deadline',
         'reminder_sent_at',
         'handled_by',       // Sprint 2.1: audit trail admin yang menangani
+        'canceled_at',
+        'completed_at',
     ];
 
     protected $casts = [
         'booking_date' => 'date:Y-m-d',
         'payment_deadline' => 'datetime',
-        'reminder_sent_at' => 'datetime'
+        'reminder_sent_at' => 'datetime',
+        'canceled_at' => 'datetime',
+        'completed_at' => 'datetime',
     ];
 
     public function patient()
@@ -68,12 +72,47 @@ class Booking extends Model
 
     protected static function booted()
     {
+        static::updating(function ($booking) {
+            if ($booking->isDirty('status')) {
+                if ($booking->status === 'canceled' && is_null($booking->canceled_at)) {
+                    $booking->canceled_at = now();
+                }
+                if ($booking->status === 'completed' && is_null($booking->completed_at)) {
+                    $booking->completed_at = now();
+                }
+            }
+        });
+
         static::updated(function ($booking) {
             try {
                 event(new \App\Events\MyEvent($booking));
             } catch (\Exception $e) {
                 // Log error silently to not break the app flow
                 \Illuminate\Support\Facades\Log::error("Pusher Updated Event Failed: " . $e->getMessage());
+            }
+
+            // Double-entry bookkeeping auto-refund for canceled bookings paid via transfer
+            if ($booking->status === 'canceled') {
+                $hasPaidTransfer = \App\Models\Transaction::where('booking_id', $booking->id)
+                    ->where('status', 'paid')
+                    ->where('payment_method', 'transfer')
+                    ->exists();
+
+                if ($hasPaidTransfer) {
+                    $alreadyRefunded = \App\Models\Transaction::where('booking_id', $booking->id)
+                        ->where('status', 'refund')
+                        ->exists();
+
+                    if (!$alreadyRefunded) {
+                        \App\Models\Transaction::create([
+                            'booking_id' => $booking->id,
+                            'payment_method' => 'transfer',
+                            'status' => 'refund',
+                            'amount' => $booking->total_price,
+                            'refunded_at' => now(),
+                        ]);
+                    }
+                }
             }
         });
     }

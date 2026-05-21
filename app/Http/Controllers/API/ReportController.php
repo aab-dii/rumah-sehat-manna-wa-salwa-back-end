@@ -12,6 +12,7 @@ use App\Helpers\ResponseFormatter;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class ReportController extends Controller
 {
@@ -34,16 +35,26 @@ class ReportController extends Controller
                 $end = Carbon::now()->endOfWeek();
                 break;
             case 'monthly':
-                $start = Carbon::now()->startOfMonth();
-                $end = Carbon::now()->endOfMonth();
+                if ($request->has('start_date') && $request->has('end_date')) {
+                    $start = Carbon::parse($request->start_date)->startOfMonth();
+                    $end = Carbon::parse($request->end_date)->endOfMonth();
+                } else {
+                    $start = Carbon::now()->startOfMonth();
+                    $end = Carbon::now()->endOfMonth();
+                }
                 break;
             case 'quarterly':
                 $start = Carbon::now()->startOfQuarter();
                 $end = Carbon::now()->endOfQuarter();
                 break;
             case 'yearly':
-                $start = Carbon::now()->startOfYear();
-                $end = Carbon::now()->endOfYear();
+                if ($request->has('start_date') && $request->has('end_date')) {
+                    $start = Carbon::parse($request->start_date)->startOfYear();
+                    $end = Carbon::parse($request->end_date)->endOfYear();
+                } else {
+                    $start = Carbon::now()->startOfYear();
+                    $end = Carbon::now()->endOfYear();
+                }
                 break;
             case 'custom':
                 if ($request->has('start_date') && $request->has('end_date')) {
@@ -57,13 +68,31 @@ class ReportController extends Controller
     }
 
     /**
-     * Mengecek apakah pasien adalah pasien baru (belum ada riwayat completed sebelum start_date)
+     * Mengecek apakah pasien adalah pasien baru (transaksi pertama kalinya sukses di dalam sistem)
+     * Kriteria sukses: completed, confirmed, atau force_completed
      */
-    private function isNewPatient($patientId, $bookingId, $bookingDate)
+    private function isNewPatient($booking)
     {
+        $patientId = $booking->patient_id;
+        $bookingDate = Carbon::parse($booking->booking_date)->format('Y-m-d');
+        $bookingTime = $booking->booking_time;
+        $bookingId = $booking->id;
+
         $hasPrevious = Booking::where('patient_id', $patientId)
-            ->whereIn('status', ['completed', 'force_completed'])
-            ->where('booking_date', '<', $bookingDate)
+            ->whereIn('status', ['completed', 'confirmed', 'force_completed'])
+            ->where(function ($q) use ($bookingDate, $bookingTime, $bookingId) {
+                $q->where('booking_date', '<', $bookingDate)
+                  ->orWhere(function ($q2) use ($bookingDate, $bookingTime, $bookingId) {
+                      $q2->where('booking_date', '=', $bookingDate)
+                         ->where(function ($q3) use ($bookingTime, $bookingId) {
+                             $q3->where('booking_time', '<', $bookingTime)
+                                ->orWhere(function ($q4) use ($bookingTime, $bookingId) {
+                                    $q4->where('booking_time', '=', $bookingTime)
+                                       ->where('id', '<', $bookingId);
+                                });
+                         });
+                  });
+            })
             ->exists();
             
         return !$hasPrevious;
@@ -76,36 +105,68 @@ class ReportController extends Controller
     {
         [$startDate, $endDate] = $this->parsePeriodFilter($request);
         
+        // Base query for successful or refunded transactions
         $query = Transaction::with(['booking.patient', 'booking.therapist', 'booking.service'])
+            ->whereIn('status', ['paid', 'refund'])
             ->whereHas('booking', function ($q) use ($startDate, $endDate) {
                 $q->whereBetween('booking_date', [$startDate->format('Y-m-d'), $endDate->format('Y-m-d')]);
             });
 
-        // Rekapitulasi (Hanya yang paid)
-        $paidQuery = clone $query;
-        $totalRevenue = $paidQuery->where('status', 'paid')->sum('amount');
-        
-        // Status count
-        $allTx = clone $query;
-        $statuses = $allTx->pluck('status');
-        $totalSuccess = $statuses->filter(fn($s) => $s === 'paid')->count();
-        $totalCanceled = Booking::whereBetween('booking_date', [$startDate->format('Y-m-d'), $endDate->format('Y-m-d')])
-            ->where('status', 'canceled')->count();
+        // Fetch all transactions in the period to accurately calculate net metrics in one pass
+        $allTransactions = Transaction::with(['booking.service'])
+            ->whereIn('status', ['paid', 'refund'])
+            ->whereHas('booking', function ($q) use ($startDate, $endDate) {
+                $q->whereBetween('booking_date', [$startDate->format('Y-m-d'), $endDate->format('Y-m-d')]);
+            })
+            ->get();
 
-        // Revenue per service
+        $totalRevenue = 0;
+        $totalSuccess = 0;
+        $totalAdminFee = 0;
+
         $services = Service::all();
+        $serviceRevenueMap = [];
+        foreach ($services as $srv) {
+            $serviceRevenueMap[$srv->id] = 0;
+        }
+
+        foreach ($allTransactions as $tx) {
+            $isRefund = ($tx->status === 'refund' || $tx->status === 'refunded' || $tx->status === 'cancelled');
+            $amount = (int) $tx->amount;
+            
+            // Calculate admin fee for this transaction
+            $adminFee = 0;
+            if ($tx->booking && $tx->booking->service) {
+                // Formula: amount - service price
+                $adminFee = max(0, $amount - (int) $tx->booking->service->price);
+            }
+
+            if ($isRefund) {
+                $totalRevenue -= $amount;
+                $totalAdminFee -= $adminFee;
+                if ($tx->booking) {
+                    $serviceRevenueMap[$tx->booking->service_id] -= $amount;
+                }
+            } else {
+                $totalRevenue += $amount;
+                $totalSuccess++;
+                $totalAdminFee += $adminFee;
+                if ($tx->booking) {
+                    $serviceRevenueMap[$tx->booking->service_id] += $amount;
+                }
+            }
+        }
+
         $revenueByService = [];
         foreach ($services as $srv) {
-            $sum = Transaction::whereHas('booking', function ($q) use ($startDate, $endDate, $srv) {
-                $q->whereBetween('booking_date', [$startDate->format('Y-m-d'), $endDate->format('Y-m-d')])
-                  ->where('service_id', $srv->id);
-            })->where('status', 'paid')->sum('amount');
-            
             $revenueByService[] = [
                 'service_name' => $srv->name,
-                'revenue' => (int) $sum
+                'revenue' => (int) $serviceRevenueMap[$srv->id]
             ];
         }
+
+        $totalCanceled = Booking::whereBetween('booking_date', [$startDate->format('Y-m-d'), $endDate->format('Y-m-d')])
+            ->where('status', 'canceled')->count();
 
         // Data transaksi
         $query->orderBy('created_at', 'desc');
@@ -115,6 +176,9 @@ class ReportController extends Controller
         
         $dataList = ($isExport ? $transactions : $transactions->getCollection())->map(function ($tx) {
             $b = $tx->booking;
+            $isRefund = ($tx->status === 'refund' || $tx->status === 'refunded' || $tx->status === 'cancelled');
+            $amount = (int) $tx->amount;
+            
             return [
                 'id' => $tx->id,
                 'booking_date' => $b ? Carbon::parse($b->booking_date)->format('Y-m-d') : null,
@@ -124,7 +188,10 @@ class ReportController extends Controller
                 'service_name' => $b && $b->service ? $b->service->name : '-',
                 'payment_method' => $tx->payment_method,
                 'status' => $tx->status,
-                'total_amount' => (int) $tx->amount,
+                'total_amount' => $isRefund ? -$amount : $amount,
+                'is_refund' => $isRefund,
+                'verified_at' => $tx->verified_at ? Carbon::parse($tx->verified_at)->format('Y-m-d H:i:s') : null,
+                'refunded_at' => $tx->refunded_at ? Carbon::parse($tx->refunded_at)->format('Y-m-d H:i:s') : null,
             ];
         });
 
@@ -133,6 +200,7 @@ class ReportController extends Controller
             'total_revenue' => (int) $totalRevenue,
             'total_success' => $totalSuccess,
             'total_canceled' => $totalCanceled,
+            'total_admin_fee' => (int) $totalAdminFee,
             'revenue_by_service' => $revenueByService,
             'transactions' => $dataList,
             'pagination' => $isExport ? null : [
@@ -171,7 +239,7 @@ class ReportController extends Controller
         $bookings = $isExport ? $query->get() : $query->paginate(15);
         
         $dataList = ($isExport ? $bookings : $bookings->getCollection())->map(function ($b, $index) {
-            $isNew = $this->isNewPatient($b->patient_id, $b->id, $b->booking_date);
+            $isNew = $this->isNewPatient($b);
             
             $age = null;
             if ($b->patient && $b->patient->birth_date) {
@@ -208,17 +276,48 @@ class ReportController extends Controller
         $summaryQuery = clone $query;
         $allBookings = $summaryQuery->get();
         
-        $totalL = 0; $totalP = 0;
-        $totalNew = 0; $totalOld = 0;
+        $uniquePatients = [];
         $totalRamuan = 0; $totalKeterampilan = 0;
 
         foreach ($allBookings as $b) {
-            if ($b->patient && $b->patient->gender === 'P') $totalP++; else $totalL++;
-            if ($this->isNewPatient($b->patient_id, $b->id, $b->booking_date)) $totalNew++; else $totalOld++;
+            $pid = $b->patient_id;
+            
+            if (!isset($uniquePatients[$pid])) {
+                $uniquePatients[$pid] = [
+                    'gender' => $b->patient->gender ?? 'L',
+                    'earliest_booking' => $b,
+                ];
+            } else {
+                $currentEarliest = $uniquePatients[$pid]['earliest_booking'];
+                $isEarlier = false;
+                if ($b->booking_date < $currentEarliest->booking_date) {
+                    $isEarlier = true;
+                } elseif ($b->booking_date === $currentEarliest->booking_date) {
+                    if ($b->booking_time < $currentEarliest->booking_time) {
+                        $isEarlier = true;
+                    } elseif ($b->booking_time === $currentEarliest->booking_time) {
+                        if ($b->id < $currentEarliest->id) {
+                            $isEarlier = true;
+                        }
+                    }
+                }
+                
+                if ($isEarlier) {
+                    $uniquePatients[$pid]['earliest_booking'] = $b;
+                }
+            }
             
             $serviceName = strtolower($b->service->name ?? '');
             if (str_contains($serviceName, 'ramuan')) $totalRamuan++;
             else $totalKeterampilan++;
+        }
+
+        $totalL = 0; $totalP = 0;
+        $totalNew = 0; $totalOld = 0;
+
+        foreach ($uniquePatients as $pid => $pData) {
+            if ($pData['gender'] === 'P') $totalP++; else $totalL++;
+            if ($this->isNewPatient($pData['earliest_booking'])) $totalNew++; else $totalOld++;
         }
 
         $therapistName = $therapistId ? (User::find($therapistId)->name ?? 'Semua Terapis') : 'Semua Terapis';
@@ -276,13 +375,43 @@ class ReportController extends Controller
             $patientIds = $completedBookings->pluck('patient_id')->unique();
             $totalPatients = $patientIds->count();
             
-            $newPatients = 0; $oldPatients = 0;
-            $bekam = 0; $akupunktur = 0; $ramuan = 0;
-            
+            $uniquePatients = [];
             foreach ($completedBookings as $b) {
-                if ($this->isNewPatient($b->patient_id, $b->id, $b->booking_date)) $newPatients++;
-                else $oldPatients++;
-                
+                $pid = $b->patient_id;
+                if (!isset($uniquePatients[$pid])) {
+                    $uniquePatients[$pid] = $b;
+                } else {
+                    $currentEarliest = $uniquePatients[$pid];
+                    $isEarlier = false;
+                    if ($b->booking_date < $currentEarliest->booking_date) {
+                        $isEarlier = true;
+                    } elseif ($b->booking_date === $currentEarliest->booking_date) {
+                        if ($b->booking_time < $currentEarliest->booking_time) {
+                            $isEarlier = true;
+                        } elseif ($b->booking_time === $currentEarliest->booking_time) {
+                            if ($b->id < $currentEarliest->id) {
+                                $isEarlier = true;
+                            }
+                        }
+                    }
+                    if ($isEarlier) {
+                        $uniquePatients[$pid] = $b;
+                    }
+                }
+            }
+
+            $newPatients = 0;
+            $oldPatients = 0;
+            foreach ($uniquePatients as $pid => $earliestBooking) {
+                if ($this->isNewPatient($earliestBooking)) {
+                    $newPatients++;
+                } else {
+                    $oldPatients++;
+                }
+            }
+
+            $bekam = 0; $akupunktur = 0; $ramuan = 0;
+            foreach ($completedBookings as $b) {
                 $sName = strtolower($b->service->name ?? '');
                 if (str_contains($sName, 'bekam')) $bekam++;
                 elseif (str_contains($sName, 'akupunktur')) $akupunktur++;
@@ -327,10 +456,39 @@ class ReportController extends Controller
             ->get();
 
         $totalVisits = $bookings->count();
-        $newPatients = 0; $oldPatients = 0;
+        $uniquePatients = [];
         foreach ($bookings as $b) {
-            if ($this->isNewPatient($b->patient_id, $b->id, $b->booking_date)) $newPatients++;
-            else $oldPatients++;
+            $pid = $b->patient_id;
+            if (!isset($uniquePatients[$pid])) {
+                $uniquePatients[$pid] = $b;
+            } else {
+                $currentEarliest = $uniquePatients[$pid];
+                $isEarlier = false;
+                if ($b->booking_date < $currentEarliest->booking_date) {
+                    $isEarlier = true;
+                } elseif ($b->booking_date === $currentEarliest->booking_date) {
+                    if ($b->booking_time < $currentEarliest->booking_time) {
+                        $isEarlier = true;
+                    } elseif ($b->booking_time === $currentEarliest->booking_time) {
+                        if ($b->id < $currentEarliest->id) {
+                            $isEarlier = true;
+                        }
+                    }
+                }
+                if ($isEarlier) {
+                    $uniquePatients[$pid] = $b;
+                }
+            }
+        }
+
+        $newPatients = 0;
+        $oldPatients = 0;
+        foreach ($uniquePatients as $pid => $earliestBooking) {
+            if ($this->isNewPatient($earliestBooking)) {
+                $newPatients++;
+            } else {
+                $oldPatients++;
+            }
         }
 
         $totalRevenue = Transaction::whereHas('booking', function($q) use ($startDate, $endDate) {

@@ -15,7 +15,7 @@ return new class extends Migration
             $table->id();
             $table->foreignId('booking_id')->constrained('bookings')->onDelete('cascade');
             $table->string('payment_method')->nullable(); // 'cash', 'transfer'
-            $table->enum('status', ['unpaid', 'paid', 'pending', 'failed', 'rejected'])->default('unpaid');
+            $table->enum('status', ['unpaid', 'paid', 'pending', 'failed', 'rejected', 'refund'])->default('unpaid');
             $table->integer('amount')->default(0);
             $table->string('proof_of_transfer')->nullable();
             $table->timestamps();

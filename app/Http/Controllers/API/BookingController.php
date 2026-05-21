@@ -502,8 +502,30 @@ class BookingController extends Controller
 
         $booking->update([
             'status' => 'canceled',
-            'cancellation_reason' => $request->cancellation_reason
+            'cancellation_reason' => $request->cancellation_reason,
+            'canceled_at' => now(),
         ]);
+
+        $hasPaidTransfer = \App\Models\Transaction::where('booking_id', $booking->id)
+            ->where('status', 'paid')
+            ->where('payment_method', 'transfer')
+            ->exists();
+
+        if ($hasPaidTransfer) {
+            $alreadyRefunded = \App\Models\Transaction::where('booking_id', $booking->id)
+                ->where('status', 'refund')
+                ->exists();
+
+            if (!$alreadyRefunded) {
+                \App\Models\Transaction::create([
+                    'booking_id' => $booking->id,
+                    'payment_method' => 'transfer',
+                    'status' => 'refund',
+                    'amount' => $booking->total_price,
+                    'refunded_at' => now(),
+                ]);
+            }
+        }
 
         try {
             event(new MyEvent($booking));
@@ -647,6 +669,7 @@ class BookingController extends Controller
         $transaction->update([
             'status'         => 'paid',
             'rejection_note' => null,
+            'verified_at'    => now(),
         ]);
 
         // 2. Update status booking menjadi 'confirmed' + audit trail

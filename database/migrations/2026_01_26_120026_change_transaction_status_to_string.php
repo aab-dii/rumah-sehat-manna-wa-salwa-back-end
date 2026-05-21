@@ -27,7 +27,7 @@ return new class extends Migration
         Schema::table('transactions', function (Blueprint $table) {
             // Revert back to ENUM if needed, but risky if data has 'failed'
             if (DB::getDriverName() !== 'sqlite') {
-                DB::statement("ALTER TABLE transactions MODIFY COLUMN status ENUM('paid', 'unpaid', 'pending', 'failed') DEFAULT 'unpaid'");
+                DB::statement("ALTER TABLE transactions MODIFY COLUMN status ENUM('paid', 'unpaid', 'pending', 'failed', 'rejected', 'refund') DEFAULT 'unpaid'");
             }
         });
     }

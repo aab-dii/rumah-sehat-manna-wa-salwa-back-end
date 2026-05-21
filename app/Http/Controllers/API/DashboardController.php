@@ -64,7 +64,7 @@ class DashboardController extends Controller
 
         // ── Admin-only extras ─────────────────────────────────────────────
         $adminExtras = [];
-        if ($user->role === 'admin') {
+        if ($user->role === 'admin' || $user->role === 'super_admin') {
             // Statistik Admin Hari Ini (untuk cards)
             $adminExtras['admin_stats'] = [
                 'confirmed'            => (clone $todayBase)->where('status', 'confirmed')->count(),
