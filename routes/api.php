@@ -22,7 +22,7 @@ Route::get('services', [ServiceController::class, 'all']);
 // ═══════════════════════════════════════════════════════════════════════════
 // AUTHENTICATED ROUTES (Sprint 2.1: + ensureActive untuk cek akun aktif)
 // ═══════════════════════════════════════════════════════════════════════════
-Route::middleware(['auth:sanctum', 'ensureActive'])->group(function () {
+Route::middleware(['auth:sanctum', 'ensureActive', 'throttle:api'])->group(function () {
     Route::get('user', [AuthController::class, 'fetch']);
     Route::post('user/update', [AuthController::class, 'updateProfile']);
     Route::post('user/change-password', [AuthController::class, 'changePassword']);
@@ -51,7 +51,7 @@ Route::middleware(['auth:sanctum', 'ensureActive'])->group(function () {
     Route::post('schedules/add-holiday', [ScheduleController::class, 'addHoliday']);
 
     Route::get('bookings', [BookingController::class, 'all']);
-    Route::post('bookings', [BookingController::class, 'store']);
+    Route::post('bookings', [BookingController::class, 'store'])->middleware('throttle:booking_limiter');
     Route::post('bookings/{id}', [BookingController::class, 'update']);
     Route::get('bookings/{id}', [BookingController::class, 'show']);
     Route::delete('bookings/{id}', [BookingController::class, 'destroy']);

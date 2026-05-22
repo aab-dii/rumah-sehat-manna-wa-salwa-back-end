@@ -211,26 +211,52 @@ class BookingController extends Controller
         );
     }
 
+    /**
+     * ═══════════════════════════════════════════════════════════════════════
+     * BOOKING STORE — Membuat Janji Temu Baru
+     * ═══════════════════════════════════════════════════════════════════════
+     *
+     * LAPISAN KEAMANAN YANG DITERAPKAN:
+     *
+     * 1. RATE LIMITING (middleware 'throttle:booking_limiter')
+     *    → Maks 5 request/menit/user, mencegah spam booking.
+     *
+     * 2. PARAMETER TAMPERING PROTECTION (StoreBookingRequest)
+     *    → Client HANYA bisa mengirim: service_id, therapist_id, booking_time, dll.
+     *    → Field 'price' dan 'status' TIDAK diterima dari client.
+     *    → Harga SELALU diambil dari database (tabel services).
+     *
+     * 3. PESSIMISTIC LOCKING (lockForUpdate + DB::transaction)
+     *    → Mengunci baris booking yang sedang dicek sehingga transaksi lain
+     *      harus menunggu. Mencegah dua pasien memesan slot yang sama.
+     *    → Jika slot sudah terisi → HTTP 409 Conflict.
+     *
+     * @param  StoreBookingRequest  $request  (sudah divalidasi oleh FormRequest)
+     * @return \Illuminate\Http\JsonResponse
+     * ═══════════════════════════════════════════════════════════════════════
+     */
     public function store(StoreBookingRequest $request)
     {
         return DB::transaction(function () use ($request) {
-            // 1. IDENTIFIKASI USER & PASIEN
+            // ── 1. IDENTIFIKASI USER & PASIEN ────────────────────────────
             $user = Auth::user();
             // Jika admin, ambil patient_id dari request. Jika pasien, pakai ID sendiri.
             $patientId = ($user->role === 'admin') ? $request->patient_id : $user->id;
 
-            // 2. AMBIL DATA LAYANAN & WAKTU
+            // ── 2. AMBIL DATA LAYANAN & WAKTU ────────────────────────────
+            // KEAMANAN: Harga SELALU diambil dari database, BUKAN dari request.
+            // Ini mencegah parameter tampering via BurpSuite/Charles Proxy.
             $service = Service::findOrFail($request->service_id);
             $duration = $service->duration_minutes;
-            $price = $service->price;
-            $timeInput = $request->booking_time; // Konsisten pakai booking_time
+            $price = $service->price; // ← Dari database, bukan $request->price
+            $timeInput = $request->booking_time;
             $startTime = Carbon::createFromFormat('H:i', $timeInput);
             $endTime = (clone $startTime)->addMinutes($duration);
-            $endTimeWithBreak = (clone $startTime)->addMinutes($duration + $this->breakDuration); // Untuk cek jam tutup
+            $endTimeWithBreak = (clone $startTime)->addMinutes($duration + $this->breakDuration);
             $bookingDate = $request->booking_date;
             $therapistId = $request->therapist_id;
 
-            // --- 3. PENGAMAN (SECURITY GUARDS) ---
+            // ── 3. PENGAMAN (SECURITY GUARDS) ────────────────────────────
 
             // 3.1 Cek Libur
             $isHoliday = Schedule::where('therapist_id', $therapistId)
@@ -253,12 +279,16 @@ class BookingController extends Controller
                 }
             }
 
-            // 3.3 Cek Bentrok (Conflict Check) + Jeda 30 Menit + LOCKING
-            // KUNCI KEAMANAN: lockForUpdate() memaksa transaksi lain menunggu
+            // ── 3.3 PESSIMISTIC LOCKING: Cek Bentrok Terapis ─────────────
+            // KEAMANAN: lockForUpdate() mengunci baris-baris booking yang
+            // sedang diperiksa. Jika ada transaksi lain yang mencoba mengunci
+            // baris yang sama, ia akan MENUNGGU sampai transaksi ini selesai.
+            // Ini mencegah dua pasien memesan slot yang sama di milidetik
+            // yang bersamaan (race condition).
             $conflictingBooking = Booking::where('therapist_id', $therapistId)
                 ->where('booking_date', $bookingDate)
                 ->whereIn('status', ['pending', 'confirmed', 'menunggu', 'konfirmasi', 'in_progress'])
-                ->lockForUpdate() 
+                ->lockForUpdate() // ← KUNCI PESSIMISTIK: Transaksi lain harus menunggu
                 ->with('service')
                 ->get()
                 ->filter(function ($existingBooking) use ($startTime, $endTime) {
@@ -269,15 +299,17 @@ class BookingController extends Controller
                 })
                 ->first();
 
+            // Jika slot sudah terisi → HTTP 409 Conflict
             if ($conflictingBooking) {
                 return ResponseFormatter::error(null, 'Maaf, slot waktu ini baru saja dipesan oleh pasien lain. Silakan pilih waktu yang berbeda.', 409);
             }
 
-            // 3.4 Cek Bentrok Pasien (Mencegah pasien double booking di jam yang sama)
+            // ── 3.4 PESSIMISTIC LOCKING: Cek Bentrok Pasien ──────────────
+            // Mencegah pasien double booking di jam yang sama dengan terapis berbeda.
             $patientConflict = Booking::where('patient_id', $patientId)
                 ->where('booking_date', $bookingDate)
                 ->whereIn('status', ['pending', 'confirmed', 'in_progress'])
-                ->lockForUpdate()
+                ->lockForUpdate() // ← KUNCI PESSIMISTIK
                 ->with('service')
                 ->get()
                 ->filter(function ($existingBooking) use ($startTime, $endTime) {
@@ -298,10 +330,12 @@ class BookingController extends Controller
                 return ResponseFormatter::error(null, 'Layanan & jeda melebihi jam operasional (Tutup 21:00).', 422);
             }
 
-            // --- 4. MATRIKS STATUS 
+            // ── 4. MATRIKS STATUS ────────────────────────────────────────
+            // KEAMANAN: Status booking dan payment SELALU ditentukan oleh
+            // business logic server, BUKAN dari input client.
             $paymentDeadline = null;
-            $bookingStatus = 'pending';
-            $paymentStatus = 'unpaid';
+            $bookingStatus = 'pending';    // ← Ditentukan server, bukan $request->status
+            $paymentStatus = 'unpaid';     // ← Ditentukan server, bukan $request->payment_status
 
             if ($user->role === 'admin') {
                 $bookingStatus = 'confirmed';
@@ -316,9 +350,10 @@ class BookingController extends Controller
                 }
             }
 
-            // --- 5. EKSEKUSI DATABASE ---
+            // ── 5. EKSEKUSI DATABASE ─────────────────────────────────────
+            // KEAMANAN: total_price dihitung di server dari harga layanan + admin fee.
             $adminFee = config('clinic.admin_fee', 1000);
-            $totalPrice = $price + $adminFee;
+            $totalPrice = $price + $adminFee; // ← Dari database, bukan dari client
 
             $booking = Booking::create([
                 'patient_id' => $patientId,
