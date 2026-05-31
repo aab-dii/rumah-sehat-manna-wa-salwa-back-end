@@ -21,12 +21,18 @@ class UserController extends Controller
     {
         $role = $request->input('role');
 
-        // Authorization check: Admin & Super Admin bisa melihat semua, selain itu hanya terapis
+        // Authorization check: Admin & Super Admin bisa melihat semua, terapis boleh melihat pasien & terapis
         if (!$request->user()->isAdminOrSuperAdmin()) {
-            if ($role !== 'terapis') {
-                return ResponseFormatter::error(null, 'Hanya admin yang dapat mengakses daftar user', 403);
+            if ($request->user()->role === 'terapis') {
+                if (!in_array($role, ['pasien', 'terapis'])) {
+                    return ResponseFormatter::error(null, 'Akses ditolak', 403);
+                }
+            } else {
+                // Pasien hanya boleh mencari terapis
+                if ($role !== 'terapis') {
+                    return ResponseFormatter::error(null, 'Hanya admin yang dapat mengakses daftar user', 403);
+                }
             }
-            // Jika bukan admin tapi mencari role 'terapis', izinkan (untuk dropdown booking)
         }
 
         $limit = $request->input('limit', 10);
