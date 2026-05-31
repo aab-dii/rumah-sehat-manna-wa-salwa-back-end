@@ -21,7 +21,7 @@ class TherapyRecordController extends Controller
         if ($id) {
             $record = TherapyRecord::with(['therapist', 'booking.service', 'patient'])->find($id);
 
-            if ($record && ($record->patient_id == $user->id || $user->role == 'terapis' || $user->role == 'admin')) {
+            if ($record && ($record->patient_id == $user->id || $user->role == 'terapis' || $user->isAdminOrSuperAdmin())) {
                 // Simplified data transformation
                 $data = [
                     'id'                => $record->id,

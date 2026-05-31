@@ -79,7 +79,7 @@ class SendFcmNotification
 
         // 3. STATUS: CANCELED
         elseif ($status === 'canceled') {
-            if ($actor && $actor->role === 'admin') {
+            if ($actor && $actor->isAdminOrSuperAdmin()) {
                 // Admin yang batalin → kabari Pasien
                 FcmService::send(
                     $patient->fcm_token,

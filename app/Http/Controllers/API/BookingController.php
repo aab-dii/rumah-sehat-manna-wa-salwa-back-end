@@ -241,7 +241,7 @@ class BookingController extends Controller
             // ── 1. IDENTIFIKASI USER & PASIEN ────────────────────────────
             $user = Auth::user();
             // Jika admin, ambil patient_id dari request. Jika pasien, pakai ID sendiri.
-            $patientId = ($user->role === 'admin') ? $request->patient_id : $user->id;
+            $patientId = ($user->isAdminOrSuperAdmin()) ? $request->patient_id : $user->id;
 
             // ── 2. AMBIL DATA LAYANAN & WAKTU ────────────────────────────
             // KEAMANAN: Harga SELALU diambil dari database, BUKAN dari request.
@@ -337,7 +337,7 @@ class BookingController extends Controller
             $bookingStatus = 'pending';    // ← Ditentukan server, bukan $request->status
             $paymentStatus = 'unpaid';     // ← Ditentukan server, bukan $request->payment_status
 
-            if ($user->role === 'admin') {
+            if ($user->isAdminOrSuperAdmin()) {
                 $bookingStatus = 'confirmed';
                 $paymentStatus = 'paid';
             } else {
