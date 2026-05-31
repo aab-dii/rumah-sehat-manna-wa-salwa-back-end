@@ -60,6 +60,8 @@ class UserController extends Controller
              $users->where('name', 'like', '%' . $search . '%');
         }
 
+        $users->orderBy('name', 'asc');
+
         return ResponseFormatter::success(
             $users->paginate($limit),
             'Data list user berhasil diambil'

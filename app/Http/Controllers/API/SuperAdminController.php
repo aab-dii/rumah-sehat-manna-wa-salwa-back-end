@@ -37,7 +37,7 @@ class SuperAdminController extends Controller
     {
         $admins = User::admins()
             ->select('id', 'name', 'email', 'role', 'phone_number', 'is_active', 'last_active_at', 'created_at')
-            ->orderBy('created_at', 'desc')
+            ->orderBy('name', 'asc')
             ->get();
 
         return ResponseFormatter::success($admins, 'Data admin berhasil diambil');
