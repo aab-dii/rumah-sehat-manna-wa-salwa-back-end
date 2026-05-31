@@ -11,10 +11,30 @@ class BookingDetailResource extends JsonResource
 {
     public function toArray($request)
     {
+        $user = $request->user();
+        
+        $showPatient = false;
+        $showTherapist = false;
+        
+        if ($user) {
+            if ($user->isAdminOrSuperAdmin()) {
+                $showPatient = true;
+                $showTherapist = true;
+            } elseif ($user->role === 'pasien') {
+                $showTherapist = true;
+            } elseif ($user->role === 'terapis') {
+                $showPatient = true;
+            }
+        } else {
+            $showPatient = true;
+            $showTherapist = true;
+        }
+
         $duration = $this->service->duration_minutes ?? 60; 
         $startTime = \Carbon\Carbon::parse($this->booking_time);
         $endTime = $startTime->copy()->addMinutes($duration);
-        return [
+
+        $data = [
             'appointment' => [
                 'id' => $this->id,
                 'booking_date' => Carbon::parse($this->booking_date)->translatedFormat('l, d F Y'), 
@@ -36,27 +56,6 @@ class BookingDetailResource extends JsonResource
                 'updated_at' => $this->updated_at,
             ],
         
-            'patient' => [
-                'id' => $this->patient->id,
-                'name' => $this->patient->name,
-                'phone_number' => $this->patient->phone_number, 
-                'profile_photo_path' => $this->patient->profile_photo_path 
-                    ? url('storage/' . $this->patient->profile_photo_path) 
-                    : null,
-                'foto_url' => $this->patient->photo_url, // Foto dari Google
-            ],
-
-            // 3. Data Terapis
-            'therapist' => [
-                'id' => $this->therapist->id,
-                'name' => $this->therapist->name,
-                'phone_number' => $this->therapist->phone_number ?? null,
-                'profile_photo_path' => $this->therapist->profile_photo_path 
-                    ? url('storage/' . $this->therapist->profile_photo_path) 
-                    : null,
-                'foto_url' => $this->therapist->photo_url, // Foto dari Google
-            ],
-
             // 4. Data Layanan
             'service' => [
                 'id' => $this->service->id,
@@ -79,5 +78,31 @@ class BookingDetailResource extends JsonResource
                 'updated_at' => $this->transaction->updated_at->toIso8601String(),
             ] : null,
         ];
+
+        if ($showPatient && $this->patient) {
+            $data['patient'] = [
+                'id' => $this->patient->id,
+                'name' => $this->patient->name,
+                'phone_number' => $this->patient->phone_number, 
+                'profile_photo_path' => $this->patient->profile_photo_path 
+                    ? url('storage/' . $this->patient->profile_photo_path) 
+                    : null,
+                'foto_url' => $this->patient->photo_url, // Foto dari Google
+            ];
+        }
+
+        if ($showTherapist && $this->therapist) {
+            $data['therapist'] = [
+                'id' => $this->therapist->id,
+                'name' => $this->therapist->name,
+                'phone_number' => $this->therapist->phone_number ?? null,
+                'profile_photo_path' => $this->therapist->profile_photo_path 
+                    ? url('storage/' . $this->therapist->profile_photo_path) 
+                    : null,
+                'foto_url' => $this->therapist->photo_url, // Foto dari Google
+            ];
+        }
+
+        return $data;
     }
 }
