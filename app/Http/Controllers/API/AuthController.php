@@ -74,7 +74,7 @@ class AuthController extends Controller
             $request->validate([
                 'nama_lengkap' => ['required', 'string', 'max:255'],
                 'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
-                'password' => ['required', 'string', 'min:8'],
+                'password' => ['required', 'string', 'min:8', 'max:64'],
                 'no_hp' => ['required', 'string', 'max:20'],
                 'firebase_uid' => ['required', 'string'],
             ]);
@@ -162,7 +162,7 @@ class AuthController extends Controller
         try {
             $request->validate([
                 'email' => 'email|required',
-                'password' => 'required'
+                'password' => 'required|max:64'
             ]);
 
             $credentials = request(['email', 'password']);
@@ -178,6 +178,8 @@ class AuthController extends Controller
                     'message' => 'Invalid Credentials'
                 ], 'Email atau password salah.', 401);
             }
+
+            $tokenResult = $user->createToken('authToken')->plainTextToken;
 
             return ResponseFormatter::success([
                 'access_token' => $tokenResult,
@@ -307,7 +309,7 @@ class AuthController extends Controller
     {
         $request->validate([
             'old_password' => 'required',
-            'new_password' => 'required|min:8'
+            'new_password' => 'required|min:8|max:64'
         ]);
 
         $user = Auth::user();

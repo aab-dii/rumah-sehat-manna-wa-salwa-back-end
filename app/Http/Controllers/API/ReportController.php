@@ -79,7 +79,7 @@ class ReportController extends Controller
         $bookingId = $booking->id;
 
         $hasPrevious = Booking::where('patient_id', $patientId)
-            ->whereIn('status', ['completed', 'confirmed', 'force_completed'])
+            ->whereIn('status', ['completed', 'force_completed'])
             ->where(function ($q) use ($bookingDate, $bookingTime, $bookingId) {
                 $q->where('booking_date', '<', $bookingDate)
                   ->orWhere(function ($q2) use ($bookingDate, $bookingTime, $bookingId) {
@@ -238,7 +238,7 @@ class ReportController extends Controller
         $isExport = $request->query('export') === 'true';
         $bookings = $isExport ? $query->get() : $query->paginate(15);
         
-        $dataList = ($isExport ? $bookings : $bookings->getCollection())->map(function ($b, $index) {
+        $dataList = ($isExport ? $bookings : $bookings->getCollection())->map(function ($b, $index) use ($isExport, $bookings) {
             $isNew = $this->isNewPatient($b);
             
             $age = null;
@@ -247,16 +247,29 @@ class ReportController extends Controller
             }
 
             $serviceName = strtolower($b->service->name ?? '');
+            $isKombinasi = str_contains($serviceName, 'kombinasi');
             $isRamuan = str_contains($serviceName, 'ramuan');
             $isKeterampilan = str_contains($serviceName, 'bekam') || str_contains($serviceName, 'akupunktur');
-            // Jika bukan keduanya tapi completed, anggap keterampilan
-            if (!$isRamuan && !$isKeterampilan) $isKeterampilan = true;
+            
+            if ($isKombinasi) {
+                $isRamuan = false;
+                $isKeterampilan = false;
+            } else {
+                if (!$isRamuan && !$isKeterampilan) {
+                    $isKeterampilan = true;
+                }
+            }
 
             $complaint = $b->therapyRecord->patient_complaint ?? '-';
             $notes = $b->therapyRecord->therapist_action ?? '-';
 
+            $no = $index + 1;
+            if (!$isExport) {
+                $no = (($bookings->currentPage() - 1) * $bookings->perPage()) + $index + 1;
+            }
+
             return [
-                'no' => $index + 1,
+                'no' => $no,
                 'id' => $b->id,
                 'date' => Carbon::parse($b->booking_date)->format('Y-m-d'),
                 'patient_name' => $b->patient->name ?? '-',
@@ -267,7 +280,7 @@ class ReportController extends Controller
                 'complaint' => $complaint,
                 'is_ramuan' => $isRamuan,
                 'is_keterampilan' => $isKeterampilan,
-                'is_kombinasi' => false,
+                'is_kombinasi' => $isKombinasi,
                 'notes' => $notes
             ];
         });
@@ -276,48 +289,42 @@ class ReportController extends Controller
         $summaryQuery = clone $query;
         $allBookings = $summaryQuery->get();
         
-        $uniquePatients = [];
-        $totalRamuan = 0; $totalKeterampilan = 0;
+        $totalL = 0;
+        $totalP = 0;
+        $totalNew = 0;
+        $totalOld = 0;
+        $totalRamuan = 0;
+        $totalKeterampilan = 0;
+        $totalKombinasi = 0;
 
         foreach ($allBookings as $b) {
-            $pid = $b->patient_id;
-            
-            if (!isset($uniquePatients[$pid])) {
-                $uniquePatients[$pid] = [
-                    'gender' => $b->patient->gender ?? 'L',
-                    'earliest_booking' => $b,
-                ];
+            // Gender
+            if (($b->patient->gender ?? 'L') === 'P') {
+                $totalP++;
             } else {
-                $currentEarliest = $uniquePatients[$pid]['earliest_booking'];
-                $isEarlier = false;
-                if ($b->booking_date < $currentEarliest->booking_date) {
-                    $isEarlier = true;
-                } elseif ($b->booking_date === $currentEarliest->booking_date) {
-                    if ($b->booking_time < $currentEarliest->booking_time) {
-                        $isEarlier = true;
-                    } elseif ($b->booking_time === $currentEarliest->booking_time) {
-                        if ($b->id < $currentEarliest->id) {
-                            $isEarlier = true;
-                        }
-                    }
-                }
-                
-                if ($isEarlier) {
-                    $uniquePatients[$pid]['earliest_booking'] = $b;
-                }
+                $totalL++;
             }
-            
+
+            // Kunjungan (Baru / Lama)
+            if ($this->isNewPatient($b)) {
+                $totalNew++;
+            } else {
+                $totalOld++;
+            }
+
+            // Pelayanan / Tindakan
             $serviceName = strtolower($b->service->name ?? '');
-            if (str_contains($serviceName, 'ramuan')) $totalRamuan++;
-            else $totalKeterampilan++;
-        }
+            $isKombinasi = str_contains($serviceName, 'kombinasi');
+            $isRamuan = str_contains($serviceName, 'ramuan');
+            $isKeterampilan = str_contains($serviceName, 'bekam') || str_contains($serviceName, 'akupunktur');
 
-        $totalL = 0; $totalP = 0;
-        $totalNew = 0; $totalOld = 0;
-
-        foreach ($uniquePatients as $pid => $pData) {
-            if ($pData['gender'] === 'P') $totalP++; else $totalL++;
-            if ($this->isNewPatient($pData['earliest_booking'])) $totalNew++; else $totalOld++;
+            if ($isKombinasi) {
+                $totalKombinasi++;
+            } elseif ($isRamuan) {
+                $totalRamuan++;
+            } else {
+                $totalKeterampilan++;
+            }
         }
 
         $therapistName = $therapistId ? (User::find($therapistId)->name ?? 'Semua Terapis') : 'Semua Terapis';
@@ -334,7 +341,7 @@ class ReportController extends Controller
                 'total_old' => $totalOld,
                 'total_ramuan' => $totalRamuan,
                 'total_keterampilan' => $totalKeterampilan,
-                'total_kombinasi' => 0,
+                'total_kombinasi' => $totalKombinasi,
                 'total_visits' => $allBookings->count()
             ],
             'visits' => $dataList,

@@ -73,7 +73,7 @@ class UserController extends Controller
         $request->validate([
             'nama_lengkap' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
-            'password' => ['required', 'string', 'min:8'],
+            'password' => ['required', 'string', 'min:8', 'max:64'],
             'no_hp' => ['required', 'string', 'max:20'],
             'role' => ['required', 'string'],
         ]);
