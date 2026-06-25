@@ -38,7 +38,7 @@ class DashboardController extends Controller
 
         $todayStats = [
             'confirmed' => (clone $todayBase)->where('status', 'confirmed')->count(),
-            'completed' => (clone $todayBase)->where('status', 'completed')->count(),
+            'completed' => (clone $todayBase)->where('status', $user->role === 'terapis' ? 'force_completed' : 'completed')->count(),
             'canceled'  => (clone $todayBase)->where('status', 'canceled')->count(),
             'total'     => (clone $todayBase)->count(),
         ];

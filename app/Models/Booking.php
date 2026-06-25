@@ -77,7 +77,7 @@ class Booking extends Model
                 if ($booking->status === 'canceled' && is_null($booking->canceled_at)) {
                     $booking->canceled_at = now();
                 }
-                if ($booking->status === 'completed' && is_null($booking->completed_at)) {
+                if (in_array($booking->status, ['completed', 'force_completed']) && is_null($booking->completed_at)) {
                     $booking->completed_at = now();
                 }
             }
