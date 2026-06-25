@@ -57,21 +57,21 @@
     <table class="info-table">
         <tr>
             <td width="15%">Alamat</td>
-            <td width="35%">: {{ $therapist_address }}</td>
+            <td width="35%">: Kampung Tengah Gg. Masjid Ar-Rahman</td>
             <td width="15%">Bulan</td>
             <td width="35%">: {{ $period }}</td>
         </tr>
         <tr>
             <td>Kecamatan</td>
-            <td>: -</td>
+            <td>: Sangatta Selatan</td>
             <td>Pelayanan Terapi</td>
             <td>: RAMUAN TRADISIONAL DAN KETERAMPILAN KOP</td>
         </tr>
         <tr>
             <td>Kabupaten</td>
-            <td>: -</td>
-            <td>Nomor STPT</td>
-            <td>: T.500.16.7.2/6560/DPMPTSP.03</td>
+            <td>: Kutai Timur</td>
+            <td><!-- Nomor STPT --></td>
+            <td><!-- : T.500.16.7.2/6560/DPMPTSP.03 --></td>
         </tr>
     </table>
 
@@ -158,7 +158,7 @@
     </table>
 
     <div class="footer">
-        ............., {{ date('F Y') }}<br>
+        Sangatta Selatan, {{ $printed_date }}<br>
         Penyehat Tradisional,<br>
         <br><br><br><br>
         <strong>{{ $therapist_name }}</strong>
