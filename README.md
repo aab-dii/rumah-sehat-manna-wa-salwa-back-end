@@ -7,6 +7,57 @@ Repositori ini berisi kode sumber layanan backend API untuk sistem manajemen kli
 
 ---
 
+## 🌟 Fitur-Fitur Utama Backend API
+Berikut adalah detail fungsionalitas dan fitur teknis yang diimplementasikan pada sistem backend Laravel:
+
+### 1. Sistem Autentikasi Hybrid (Firebase Auth & Laravel Sanctum)
+* **Verifikasi Token Firebase:** Mengamankan akses API mobile dengan menerima dan memverifikasi Firebase ID Token dari aplikasi Android, kemudian menukarkannya dengan token akses Laravel Sanctum yang aman.
+* **Role-Based Access Control (RBAC):** Otentikasi dan otorisasi terpadu berdasarkan peran pengguna: `pasien` (patient), `terapis` (therapist), `admin`, dan `super_admin`.
+
+### 2. Manajemen Pengguna dengan Soft-Deletes
+* **Pengelolaan Multi-Role:** CRUD data pengguna (admin, terapis, pasien) dengan skema keamanan tingkat tinggi.
+* **Fitur Trash & Restore:** Menggunakan *Soft Deletes* (`deleted_at`) pada database, memungkinkan admin untuk menonaktifkan pengguna, melihat daftar sampah (trash), dan memulihkan kembali (restore) akun tanpa kehilangan riwayat data transaksi medis.
+
+### 3. Manajemen Katalog Layanan Klinik
+* **CRUD Layanan Interaktif:** Menyimpan data jenis terapi (seperti Bekam, Akupunktur, Ramuan) lengkap dengan nama, estimasi durasi, harga, dan status keaktifan.
+* **Penanganan Multipart File:** API mendukung pengunggahan gambar ikon layanan secara aman ke storage lokal dan menyediakannya melalui URL publik.
+
+### 4. Transaksi & Alur Reservasi (Booking) Terintegrasi
+* **Pemesanan Mandiri & Jadwal Dinamis:** Pasien dapat memilih layanan, hari, jam slot, dan terapis berdasarkan ketersediaan jadwal terapis yang diproses secara dinamis.
+* **Verifikasi Bukti Pembayaran:**
+  * **Opsi Tunai (Cash):** Otomatis dikonfirmasi atau diproses langsung saat kedatangan.
+  * **Opsi Transfer Bank:** Menampung unggahan foto bukti bayar dari pasien. Admin dapat memverifikasi transaksi (menerima atau menolak dengan mencantumkan alasan penolakan).
+* **Auto-Cancellation Scheduler:** Logika terjadwal untuk membatalkan pesanan transfer bank secara otomatis jika pasien tidak mengunggah bukti pembayaran dalam kurun waktu 24 jam sejak pembuatan.
+* **Force Complete:** Fitur admin untuk memaksa penyelesaian sesi janji temu yang terlewat diselesaikan oleh terapis agar pencatatan keuangan dan laporan tetap konsisten.
+
+### 5. Logika Nomor Antrean Dinamis & Real-time Sync
+* **Antrean Real-time per Hari per Terapis:** Nomor antrean dihitung secara dinamis dari database untuk setiap terapis per hari pelayanan.
+* **Logika Tie-breaker Urutan Antrean:** Urutan ditentukan secara adil berdasarkan waktu janji temu (`booking_time` ASC). Jika ada waktu yang sama, *tie-breaker* ditentukan berdasarkan urutan waktu pemesanan dibuat (`created_at` ASC).
+* **Pusher Event Broadcasting:** Memancarkan event pembaruan antrean dan status booking secara real-time ke aplikasi Android saat terjadi perubahan status janji temu.
+
+### 6. Rekam Medis & Riwayat Terapi (Medical Records)
+* **Pencatatan Klinis Terstruktur:** Terapis dapat menginput keluhan pasien, diagnosis klinis, titik bekam yang dikerjakan, ramuan herbal yang diresepkan, dan catatan evaluasi medis.
+* **Middleware Pengamanan Ketat:** Mencegah akses silang (cross-access) antar terapis; hanya terapis yang ditugaskan pada booking tersebut yang berhak membuat atau menyunting rekam medis pasien.
+* **Pencatatan Pasca Force Complete:** Transaksi yang di-force complete oleh admin tetap diwajibkan untuk diisi catatan terapinya oleh terapis yang bersangkutan melalui riwayat janji temu.
+
+### 7. Engine Laporan Komprehensif & PDF Generator
+* **DomPDF Integration:** Memanfaatkan library `barryvdh/laravel-dompdf` untuk mengubah template HTML Blade yang dirancang khusus menjadi berkas PDF standar cetak A4 Landscape.
+* **Lima Jenis Laporan Utama:**
+  1. **Laporan Keuangan:** Rincian pendapatan kotor, metode pembayaran (tunai/transfer), potongan/refund, serta ringkasan total pendapatan.
+  2. **Laporan Kunjungan Terapis:** Data kunjungan lengkap dengan alamat klinik, penutupan STPT, dan pembagian jenis kelamin pasien (L/P).
+  3. **Laporan Kinerja Terapis:** Statistik jumlah sesi pelayanan dan kontribusi pendapatan masing-masing terapis.
+  4. **Laporan Kegiatan Klinik:** Grafik kontribusi persentase layanan terpopuler dengan representasi visual string block (`██████`).
+  5. **Laporan Komparatif Performa:** Membandingkan kinerja antar terapis (hanya untuk Super Admin).
+* **Hak Akses Laporan (RBAC):**
+  * Terapis hanya dapat mengekspor laporan kinerja diri sendiri.
+  * Admin dapat mengekspor laporan Keuangan, Kunjungan, Kinerja, dan Kegiatan.
+  * Super Admin dapat mengekspor seluruh laporan termasuk Laporan Komparatif.
+
+### 8. Sistem Push Notification Terintegrasi
+* **Firebase Cloud Messaging (FCM):** Trigger otomatis pengiriman notifikasi ke perangkat HP Android pasien/terapis/admin pada setiap transisi status booking yang krusial (misal: bukti bayar ditolak, janji temu disetujui, rekam medis diisi, dll).
+
+---
+
 ## 🖥️ Tech Stack
 * **Framework:** Laravel 11
 * **Bahasa Pemrograman:** PHP >= 8.2
