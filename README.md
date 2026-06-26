@@ -7,54 +7,16 @@ Repositori ini berisi kode sumber layanan backend API untuk sistem manajemen kli
 
 ---
 
-## 🚀 Fitur Utama Aplikasi (Berdasarkan Modul)
+## ✨ Fitur Sistem
 
-Sistem **Rumah Sehat Manna wa Salwa** memiliki fitur utama yang terbagi ke dalam 5 modul fungsional sesuai dengan dokumentasi resmi proyek:
-
-### Modul 1: Autentikasi & Manajemen Akun (M-01)
-* **Registrasi Akun Mandiri:** API endpoint `/api/register` untuk pendaftaran pasien baru dengan validasi data nomor handphone, format email, dan batas keamanan sandi (8-64 karakter sesuai standar OWASP).
-* **Login Multi-Metode:** Mendukung autentikasi konvensional menggunakan email & password, serta login terintegrasi **Google Sign-In** dengan memverifikasi Firebase ID Token di backend.
-* **Penyimpanan Sesi Aman:** Penerbitan session token aman menggunakan **Laravel Sanctum** setelah token Firebase atau kredensial divalidasi.
-* **Manajemen Profil:** REST API untuk memperbarui foto profil (penyimpanan file di local storage), mengubah informasi kontak (No. HP hanya menerima input angka), alamat, pekerjaan, serta memperbarui kata sandi secara aman.
-* **Manajemen Pengguna (Admin & Super Admin - Filament v4):** 
-  * Dashboard web admin berbasis **Filament v4** untuk melihat daftar seluruh pengguna klinik yang terurut secara alfabetis (A-Z).
-  * Pembuatan akun Pasien, Terapis, dan Admin baru secara manual dari panel administrator.
-  * Penonaktifan sementara (*deactivation/soft delete*) akun staf atau pasien menggunakan fitur *Soft Deletes* Laravel (`deleted_at`).
-  * Reset kata sandi darurat yang secara otomatis menghasilkan password acak aman 12 karakter.
-
-### Modul 2: Reservasi Terapi & Pengelolaan Transaksi (M-02)
-* **Booking Layanan Terapi (Oleh Pasien):** API untuk menghitung slot waktu operasional terapis yang kosong secara dinamis, mencegah konflik jadwal, dan menerima booking dari pasien.
-* **Pembuatan Booking oleh Admin & Super Admin:** Admin atau Super Admin dapat mendaftarkan janji temu baru atas nama Pasien secara langsung melalui Panel Admin Filament. Reservasi ini otomatis berstatus terkonfirmasi (**`confirmed`**) tanpa melewati alur verifikasi bukti pembayaran.
-* **Pemisahan Alur Pembayaran:**
-  * **Metode Tunai (Cash):** Transaksi dibuat dengan status pembayaran awal *unpaid*, dan janji temu divalidasi oleh admin untuk masuk ke agenda.
-  * **Metode Transfer Bank:** Membatasi waktu unggah bukti bayar (maksimal 24 jam setelah booking dibuat atau 1 jam sebelum terapi dimulai). Menampung unggahan foto bukti transfer bank ke server.
-* **Verifikasi Pembayaran & Antrean Dinamis:**
-  * Panel admin untuk memvalidasi bukti pembayaran transfer. Menyetujui mengubah status transaksi menjadi *paid*, booking terkonfirmasi (*confirmed*), dan nomor urut antrean harian dihitung secara otomatis.
-  * Menolak pembayaran akan mengubah status menjadi *rejected* disertai kolom catatan alasan penolakan, memicu notifikasi agar pasien mengunggah ulang bukti pembayaran.
-* **Pencegahan Bentrok Jadwal (Double Booking Prevention):**
-  * Logika database menggunakan penguncian baris (*pessimistic locking* `lockForUpdate()`) untuk mencegah terapis melayani dua pasien berbeda di jam yang sama (*Double Booking Terapis*).
-  * Validasi database untuk melarang pasien memesan dua terapi yang bertabrakan di waktu yang sama (*Double Booking Pasien*).
-* **Pengelolaan Operasional (Terapis):**
-  * Terapis dapat mengatur jadwal mingguan rutin dan jam aktif praktik.
-  * Fitur pengelolaan hari libur/cuti terapis untuk mengunci kalender pemesanan pasien.
-  * Prosedur **Emergency Close (Tutup Darurat)** di backend untuk membatalkan seluruh antrean aktif hari ini dan mengunci sisa slot secara instan saat terapis mengalami kendala mendesak.
-* **Integrasi Komunikasi WhatsApp:** Menyediakan data nomor WhatsApp admin/terapis/pasien secara terformat agar aplikasi klien dapat membuka link komunikasi chat WhatsApp secara langsung.
-
-### Modul 3: Rekam Medis Digital (M-03)
-* **Pencatatan Klinis Terapis:** Endpoint API untuk terapis mengisi keluhan pasien, diagnosis, tindakan terapi yang diberikan, dan catatan tambahan. Pengisian ini secara otomatis mengubah status janji temu menjadi selesai (`completed`).
-* **Catatan Medis Susulan (Force Completed):** Memungkinkan pengisian catatan medis susulan untuk janji temu yang ditutup sepihak oleh admin (*force completed*). Sesi ini tetap muncul pada riwayat terapis dan wajib dilengkapi dengan rekam medis.
-* **Riwayat Rekam Medis Pasien:** API untuk menyajikan riwayat pengobatan dan detail rekam medis dari kunjungan-kunjungan sebelumnya secara lengkap berdasarkan hak akses (pasien melihat miliknya sendiri, terapis melihat pasien yang ia tangani).
-* **Filter Riwayat Medis:** Penyaringan catatan medis lama berdasarkan jenis layanan terapi yang pernah diambil.
-
-### Modul 4: Notifikasi & Komunikasi Real-time (M-04)
-* **Push Notification Firebase:** Menggunakan `kreait/laravel-firebase` SDK untuk mengirim push notification otomatis ke HP pengguna saat status janji temu berubah (pembayaran dikonfirmasi/ditolak, sesi dimulai/selesai, pembatalan).
-* **Deep-Link Payload:** Menyematkan data payload detail booking (`booking_id` dan `role`) pada payload notifikasi FCM agar aplikasi Android dapat melakukan navigasi langsung ke halaman detail yang sesuai.
-
-### Modul 5: Modul Laporan & Analitik Keuangan (M-05)
-* **Laporan Laba Rugi Otomatis (Manna Sheet):** Kalkulasi backend untuk pendapatan kotor, pengembalian dana (*refund* akibat pembatalan), dan total laba bersih klinik secara otomatis dan akurat setiap bulan.
-* **Tren Kunjungan:** Data statistik grafik jumlah kunjungan pasien di klinik setiap bulannya.
-* **Analisis Kinerja Terapis:** Metrik penilai produktivitas (jumlah sesi pelayanan) bagi masing-masing terapis.
-* **Ekspor Laporan PDF:** Engine PDF berbasis `barryvdh/laravel-dompdf` untuk menghasilkan file laporan keuangan bulanan (format lanskap A4) dan laporan kunjungan pasien secara dinamis langsung dari server.
+- **Autentikasi Multi-Metode** — Login via Email/Password atau Google Sign-In, dengan verifikasi Firebase ID Token dan penerbitan token sesi Laravel Sanctum
+- **Manajemen Pengguna** — CRUD pengguna berdasarkan role (Pasien, Terapis, Admin, Super Admin), soft delete, dan restore akun dari trash
+- **Katalog Layanan Klinik** — API CRUD untuk mengelola jenis terapi (nama, harga, durasi, gambar ikon)
+- **Booking & Penjadwalan** — Kalkulasi slot waktu terapis secara dinamis, pencegahan double booking, serta pembuatan booking manual oleh admin yang langsung terkonfirmasi
+- **Alur Pembayaran Ganda** — Mendukung metode Tunai (cash) dan Transfer Bank, lengkap dengan verifikasi/penolakan bukti bayar oleh admin dan auto-cancel jika bukti tidak diunggah dalam 24 jam
+- **Rekam Medis** — Input keluhan, diagnosa, dan tindakan terapi oleh terapis, termasuk pengisian susulan untuk sesi yang di-*force complete* oleh admin
+- **Push Notification (FCM)** — Notifikasi otomatis ke HP pengguna saat ada perubahan status booking (konfirmasi, penolakan, pembatalan, dll.)
+- **Laporan & Ekspor PDF** — Laporan Keuangan, Kunjungan, Kinerja Terapis, Kegiatan Klinik, dan Komparatif Terapis (khusus Super Admin), diekspor ke format PDF A4 Landscape via DomPDF
 
 ---
 
