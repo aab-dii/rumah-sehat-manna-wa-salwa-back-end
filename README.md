@@ -1,59 +1,107 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Rumah Sehat Manna wa Salwa — Backend API Server
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+[![Status](https://img.shields.io/badge/Status-Prototype%20%E2%80%94%20Local%20Only-orange)](#)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-## About Laravel
+Repositori ini berisi kode sumber layanan backend API untuk sistem manajemen klinik **Rumah Sehat Manna wa Salwa**. Backend ini bertindak sebagai server penyedia data, pengelola transaksi janji temu, dan notifikasi real-time untuk aplikasi mobile.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+---
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## 🖥️ Tech Stack
+* **Framework:** Laravel 11
+* **Bahasa Pemrograman:** PHP >= 8.2
+* **Database:** MySQL / SQLite (untuk pengujian)
+* **Real-time Event:** Pusher Channels
+* **Notifikasi & Autentikasi:** Firebase Admin SDK (FCM & Firebase Auth)
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+---
 
-## Learning Laravel
+## ⚙️ Prasyarat Sistem
+Sebelum memulai instalasi, pastikan lingkungan Anda sudah terinstal tools berikut:
+* **PHP** (Versi 8.2 atau lebih baru)
+* **Composer** (Dependency manager PHP)
+* **Node.js & NPM** (Untuk membangun aset frontend/admin panel)
+* **MySQL** (Untuk database lokal)
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+---
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+## 🛠️ Langkah Instalasi & Setup Lokal
 
-## Laravel Sponsors
+### 1. Unduh Kode Sumber
+Kloning repositori ini ke komputer lokal Anda:
+```bash
+git clone https://github.com/aab-dii/rumah-sehat-manna-wa-salwa-back-end.git
+cd rumah-sehat-manna-wa-salwa-back-end
+```
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+### 2. Instalasi Dependencies
+Jalankan perintah berikut untuk menginstal package PHP dan Javascript:
+```bash
+composer install
+npm install && npm run build
+```
 
-### Premium Partners
+### 3. Konfigurasi Environment File
+Salin file `.env.example` menjadi `.env`:
+```bash
+copy .env.example .env
+```
+Buka file `.env` di text editor Anda, kemudian sesuaikan variabel-variabel berikut:
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+#### A. Database
+Sesuaikan kredensial database lokal MySQL Anda:
+```env
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=db_rumah_sehat
+DB_USERNAME=root
+DB_PASSWORD=
+```
 
-## Contributing
+#### B. Pusher (Real-time Booking)
+Masukkan kredensial aplikasi Pusher Anda untuk mendukung fungsionalitas update real-time pada antrean:
+```env
+BROADCAST_CONNECTION=pusher
+PUSHER_APP_ID=your-pusher-app-id
+PUSHER_APP_KEY=your-pusher-app-key
+PUSHER_APP_SECRET=your-pusher-app-secret
+PUSHER_APP_CLUSTER=your-pusher-app-cluster
+```
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+#### C. Firebase Service Account JSON (SANGAT PENTING)
+Backend ini memverifikasi token masuk pasien serta mengirimkan push notification via FCM menggunakan SDK Admin Firebase.
+1. Masuk ke **Firebase Console** proyek Anda.
+2. Navigasi ke **Project Settings** > **Service Accounts**.
+3. Ketuk tombol **Generate New Private Key**, lalu unduh berkas JSON.
+4. Buat folder baru di proyek backend Anda pada jalur: `storage/app/firebase/` (jalur ini sudah aman di dalam `.gitignore` sehingga tidak akan terunggah ke repositori online).
+5. Letakkan berkas JSON tersebut ke dalam folder tersebut dan beri nama. Contoh: `rumah-sehat-firebase-adminsdk.json`.
+6. Tuliskan path file tersebut pada file `.env` Anda:
+   ```env
+   FIREBASE_CREDENTIALS=storage/app/firebase/rumah-sehat-firebase-adminsdk.json
+   ```
 
-## Code of Conduct
+### 4. Inisialisasi Application Key
+Jalankan perintah berikut untuk men-generate key enkripsi Laravel:
+```bash
+php artisan key:generate
+```
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+### 5. Migrasi & Seeding Database
+Jalankan migrasi tabel sekaligus memasukkan data dummy (seeding) untuk akun uji coba:
+```bash
+php artisan migrate:fresh --seed
+```
+*Perintah ini akan secara otomatis membuat struktur database, tabel transaksi, riwayat medis, serta men-seed data akun demo (Pasien, Terapis, Admin, Super Admin) ke database lokal.*
 
-## Security Vulnerabilities
+### 6. Menjalankan Server Lokal
+Jalankan server pengembangan Laravel agar dapat diakses dari luar localhost (oleh HP Android Anda):
+```bash
+php artisan serve --host=0.0.0.0 --port=8000
+```
+*Opsi `--host=0.0.0.0` memastikan server menerima koneksi dari perangkat luar dalam satu jaringan nirkabel (Wi-Fi) yang sama.*
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+---
 
-## License
-
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+## 🔗 Link Repositori Terkait
+* **Frontend Android App:** [rumah-sehat-manna-wa-salwa (Android App)](https://github.com/aab-dii/rumah-sehat-manna-wa-salwa)
